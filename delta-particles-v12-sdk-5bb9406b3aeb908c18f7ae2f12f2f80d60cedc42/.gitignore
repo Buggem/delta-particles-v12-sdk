@@ -1,0 +1,10 @@
+dlls/*.dll
+cl_dll/*.dll
+*.pdb
+*.ncb
+*.opt
+*.plg
+.vscode/
+build/
+build-*/
+CMakeLists.txt.user
