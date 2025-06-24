@@ -1,5 +1,0 @@
-VHLT
-CSG: -texdata 15000 -wadautodetect
-BSP:
-VIS: -full -low
-RAD: -extra -dscale 1 -blur 3 -smooth 50 -bounce 6 -gamma .56 -low
