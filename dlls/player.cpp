@@ -35,8 +35,10 @@
 #include "gamerules.h"
 #include "game.h"
 #include "hltv.h"
+#include "pm_shared.h"
 #include "effects.h" //LRC
 #include "movewith.h" //LRC
+#include "ach_counters.h"
 
 // #define DUCKFIX
 
@@ -70,12 +72,6 @@ extern CGraph	WorldGraph;
 #define	FLASH_DRAIN_TIME	 1.2 //100 units/3 minutes
 #define	FLASH_CHARGE_TIME	 0.2 // 100 units/20 seconds  (seconds per unit)
 
-#ifdef XENWARRIOR
-  float g_fEnvFadeTime = 0;    // flashlight can't be used until this time expires.
-							// this is just a big hack, doesn't work with saverestore, etc...
-							// Doing it properly would just be effort.
-#endif
-
 // Global Savedata for player
 TYPEDESCRIPTION	CBasePlayer::m_playerSaveData[] = 
 {
@@ -105,6 +101,7 @@ TYPEDESCRIPTION	CBasePlayer::m_playerSaveData[] =
 	DEFINE_ARRAY( CBasePlayer, m_rgpPlayerItems, FIELD_CLASSPTR, MAX_ITEM_TYPES ),
 	DEFINE_FIELD( CBasePlayer, m_pActiveItem, FIELD_CLASSPTR ),
 	DEFINE_FIELD( CBasePlayer, m_pLastItem, FIELD_CLASSPTR ),
+	DEFINE_FIELD( CBasePlayer, m_pNextItem, FIELD_CLASSPTR ),
 	
 	DEFINE_ARRAY( CBasePlayer, m_rgAmmo, FIELD_INTEGER, MAX_AMMO_SLOTS ),
 	DEFINE_FIELD( CBasePlayer, m_idrowndmg, FIELD_INTEGER ),
@@ -123,6 +120,7 @@ TYPEDESCRIPTION	CBasePlayer::m_playerSaveData[] =
 	DEFINE_FIELD( CBasePlayer, m_tbdPrev, FIELD_TIME ),
 
 	DEFINE_FIELD( CBasePlayer, m_pTank, FIELD_EHANDLE ), // NB: this points to a CFuncTank*Controls* now. --LRC
+	DEFINE_FIELD( CBasePlayer, m_hViewEntity, FIELD_EHANDLE ),
 	DEFINE_FIELD( CBasePlayer, m_iHideHUD, FIELD_INTEGER ),
 	DEFINE_FIELD( CBasePlayer, m_iFOV, FIELD_INTEGER ),
 
@@ -136,9 +134,9 @@ TYPEDESCRIPTION	CBasePlayer::m_playerSaveData[] =
 	//DEFINE_FIELD( CBasePlayer, m_flStopExtraSoundTime, FIELD_TIME ),
 	//DEFINE_FIELD( CBasePlayer, m_fKnownItem, FIELD_INTEGER ), // reset to zero on load
 	//DEFINE_FIELD( CBasePlayer, m_iPlayerSound, FIELD_INTEGER ),	// Don't restore, set in Precache()
-	//DEFINE_FIELD( CBasePlayer, m_pentSndLast, FIELD_EDICT ),	// Don't restore, client needs reset
-	//DEFINE_FIELD( CBasePlayer, m_flSndRoomtype, FIELD_FLOAT ),	// Don't restore, client needs reset
-	//DEFINE_FIELD( CBasePlayer, m_flSndRange, FIELD_FLOAT ),	// Don't restore, client needs reset
+	DEFINE_FIELD( CBasePlayer, m_pentSndLast, FIELD_EDICT ),
+	DEFINE_FIELD( CBasePlayer, m_SndRoomtype, FIELD_INTEGER ),
+	DEFINE_FIELD( CBasePlayer, m_flSndRange, FIELD_FLOAT ),
 	//DEFINE_FIELD( CBasePlayer, m_fNewAmmo, FIELD_INTEGER ), // Don't restore, client needs reset
 	//DEFINE_FIELD( CBasePlayer, m_flgeigerRange, FIELD_FLOAT ),	// Don't restore, reset in Precache()
 	//DEFINE_FIELD( CBasePlayer, m_flgeigerDelay, FIELD_FLOAT ),	// Don't restore, reset in Precache()
@@ -157,7 +155,18 @@ TYPEDESCRIPTION	CBasePlayer::m_playerSaveData[] =
 	//DEFINE_ARRAY( CBasePlayer, m_rgAmmoLast, FIELD_INTEGER, MAX_AMMO_SLOTS ), // Don't need to restore
 	//DEFINE_FIELD( CBasePlayer, m_fOnTarget, FIELD_BOOLEAN ), // Don't need to restore
 	//DEFINE_FIELD( CBasePlayer, m_nCustomSprayFrames, FIELD_INTEGER ), // Don't need to restore
-	
+	DEFINE_FIELD( CBasePlayer, m_fNVGisON, FIELD_BOOLEAN ),
+
+	// Counters for achievement tracking
+	DEFINE_FIELD( CBasePlayer, m_sodaDrunkCount, FIELD_SHORT ),
+	DEFINE_FIELD( CBasePlayer, m_decapitatedCount, FIELD_SHORT ),
+	DEFINE_FIELD( CBasePlayer, m_controllersKilledByAR, FIELD_SHORT ),
+	DEFINE_FIELD( CBasePlayer, m_treesKilled, FIELD_SHORT ),
+	DEFINE_FIELD( CBasePlayer, m_technicianCharges, FIELD_SHORT ),
+	DEFINE_FIELD( CBasePlayer, m_robotsKilledByMelee, FIELD_SHORT ),
+	DEFINE_FIELD( CBasePlayer, m_headcrabsKilledBySniper, FIELD_SHORT ),
+
+	DEFINE_FIELD( CBasePlayer, m_highNoonKills, FIELD_SHORT ),
 };	
 
 
@@ -207,7 +216,9 @@ int gmsgStatusIcon = 0; //LRC
 int gmsgStatusText = 0;
 int gmsgStatusValue = 0; 
 
-
+int gmsgCaption = 0;
+int gmsgNightvision = 0;
+int gmsgAchievement = 0;
 
 void LinkUserMessages( void )
 {
@@ -263,6 +274,9 @@ void LinkUserMessages( void )
 	gmsgStatusText = REG_USER_MSG("StatusText", -1);
 	gmsgStatusValue = REG_USER_MSG("StatusValue", 3); 
 
+	gmsgCaption = REG_USER_MSG("Caption", -1);
+	gmsgNightvision = REG_USER_MSG( "Nightvision", 1 );
+	gmsgAchievement = REG_USER_MSG("Achievement", -1);
 }
 
 LINK_ENTITY_TO_CLASS( player, CBasePlayer );
@@ -622,14 +636,14 @@ int CBasePlayer :: TakeDamage( entvars_t *pevInflictor, entvars_t *pevAttacker, 
 		if (bitsDamage & DMG_SONIC)
 		{
 			if (fmajor)
-				SetSuitUpdate("!HEV_DMG2", FALSE, SUIT_NEXT_IN_1MIN);	// internal bleeding
+				SetSuitUpdate("!HEV_DMG0", FALSE, SUIT_NEXT_IN_1MIN);	// minor_lacerations
 			bitsDamage &= ~DMG_SONIC;
 			ffound = TRUE;
 		}
 
 		if (bitsDamage & (DMG_POISON | DMG_PARALYZE))
 		{
-			SetSuitUpdate("!HEV_DMG3", FALSE, SUIT_NEXT_IN_1MIN);	// blood toxins detected
+			SetSuitUpdate("!HEV_DMG7", FALSE, SUIT_NEXT_IN_1MIN);	// seek_medic
 			bitsDamage &= ~(DMG_POISON | DMG_PARALYZE);
 			ffound = TRUE;
 		}
@@ -654,6 +668,7 @@ int CBasePlayer :: TakeDamage( entvars_t *pevInflictor, entvars_t *pevAttacker, 
 			bitsDamage &= ~DMG_RADIATION;
 			ffound = TRUE;
 		}
+
 		if (bitsDamage & DMG_SHOCK)
 		{
 			bitsDamage &= ~DMG_SHOCK;
@@ -661,18 +676,12 @@ int CBasePlayer :: TakeDamage( entvars_t *pevInflictor, entvars_t *pevAttacker, 
 		}
 	}
 
-	pev->punchangle.x = -2;
+	if (FBitSet(bitsDamageType, DMG_NO_PUNCH))
+		pev->punchangle.x = -0.5f;
+	else
+		pev->punchangle.x = -2;
 
-	if (fTookDamage && !ftrivial && fmajor && flHealthPrev >= 75) 
-	{
-		// first time we take major damage...
-		// turn automedic on if not on
-		SetSuitUpdate("!HEV_MED1", FALSE, SUIT_NEXT_IN_30MIN);	// automedic on
 
-		// give morphine shot if not given recently
-		SetSuitUpdate("!HEV_HEAL7", FALSE, SUIT_NEXT_IN_30MIN);	// morphine shot
-	}
-	
 	if (fTookDamage && !ftrivial && fcritical && flHealthPrev < 75)
 	{
 
@@ -916,13 +925,18 @@ void CBasePlayer::RemoveItems( int iWeaponMask, int i9mm, int i357, int iBuck, i
 	int i;
 	CBasePlayerItem *pCurrentItem;
 
-	// hornetgun is outside the spawnflags Worldcraft can set - handle it seperately.
+	if (iSatchel)
+		iWeaponMask |= 1<<WEAPON_SATCHEL;
+	if (iGren)
+		iWeaponMask |= 1<<WEAPON_HANDGRENADE;
+	if (iSnark)
+		iWeaponMask |= 1<<WEAPON_SNARK;
 	if (iHornet)
-		iWeaponMask |= 1<<WEAPON_HORNETGUN;
+		iWeaponMask |= 1<<WEAPON_SMG_NOSILENCER; // � ���� ��� �������, ������� �������� ������� ��
 
 	RemoveAmmo("9mm", i9mm);
 	RemoveAmmo("357", i357);
-	RemoveAmmo("buckshot", iBuck);
+//	RemoveAmmo("buckshot", iBuck);
 	RemoveAmmo("bolts", iBolt);
 	RemoveAmmo("ARgrenades", iARGren);
 	RemoveAmmo("uranium", iUranium);
@@ -932,6 +946,9 @@ void CBasePlayer::RemoveItems( int iWeaponMask, int i9mm, int i357, int iBuck, i
 	RemoveAmmo("Trip Mine", iTrip);
 	RemoveAmmo("Hand Grenade", iGren);
 	RemoveAmmo("Hornets", iHornet);
+/*	RemoveAmmo("44", i44);
+	RemoveAmmo("14mm", i14mm);
+	RemoveAmmo("45ACP", i45ACP);*/
 
 	for (i = 0; i < MAX_ITEM_TYPES; i++)
 	{
@@ -942,7 +959,7 @@ void CBasePlayer::RemoveItems( int iWeaponMask, int i9mm, int i357, int iBuck, i
 		{
 			if (!(1<<pCurrentItem->m_pNext->m_iId & iWeaponMask))
 			{
-				((CBasePlayerWeapon*)pCurrentItem)->DrainClip(this, FALSE, i9mm, i357, iBuck, iBolt, iARGren, iRock, iUranium, iSatchel, iSnark, iTrip, iGren);
+				((CBasePlayerWeapon*)pCurrentItem)->DrainClip(this, FALSE, i9mm, i357, iBolt, iARGren, iRock, iUranium);
 				//remove pCurrentItem->m_pNext from the list
 //				ALERT(at_console, "Removing %s. (id = %d)\n", pCurrentItem->m_pNext->pszName(), pCurrentItem->m_pNext->m_iId);
 				pCurrentItem->m_pNext->Drop( );
@@ -953,7 +970,7 @@ void CBasePlayer::RemoveItems( int iWeaponMask, int i9mm, int i357, int iBuck, i
 			else
 			{
 				//we're keeping this, so we need to empty the clip
-				((CBasePlayerWeapon*)pCurrentItem)->DrainClip(this, TRUE, i9mm, i357, iBuck, iBolt, iARGren, iRock, iUranium, iSatchel, iSnark, iTrip, iGren);
+				((CBasePlayerWeapon*)pCurrentItem)->DrainClip(this, TRUE, i9mm, i357, iBolt, iARGren, iRock, iUranium);
 				//now, leave pCurrentItem->m_pNext in the list and go on to the next
 //				ALERT(at_console, "Keeping %s. (id = %d)\n", pCurrentItem->m_pNext->pszName(), pCurrentItem->m_pNext->m_iId);
 				pCurrentItem = pCurrentItem->m_pNext;
@@ -962,7 +979,7 @@ void CBasePlayer::RemoveItems( int iWeaponMask, int i9mm, int i357, int iBuck, i
 		// we've gone through items 2+, now we finish off by checking item 1.
 		if (!(1<<m_rgpPlayerItems[i]->m_iId & iWeaponMask))
 		{
-			((CBasePlayerWeapon*)pCurrentItem)->DrainClip(this, FALSE, i9mm, i357, iBuck, iBolt, iARGren, iRock, iUranium, iSatchel, iSnark, iTrip, iGren);
+			((CBasePlayerWeapon*)pCurrentItem)->DrainClip(this, FALSE, i9mm, i357, iBolt, iARGren, iRock, iUranium);
 //			ALERT(at_console, "Removing %s. (id = %d)\n", m_rgpPlayerItems[i]->pszName(), m_rgpPlayerItems[i]->m_iId);
 			m_rgpPlayerItems[i]->Drop( );
 			if (m_pLastItem == m_rgpPlayerItems[i])
@@ -971,7 +988,7 @@ void CBasePlayer::RemoveItems( int iWeaponMask, int i9mm, int i357, int iBuck, i
 		}
 		else
 		{
-			((CBasePlayerWeapon*)pCurrentItem)->DrainClip(this, TRUE, i9mm, i357, iBuck, iBolt, iARGren, iRock, iUranium, iSatchel, iSnark, iTrip, iGren);
+			((CBasePlayerWeapon*)pCurrentItem)->DrainClip(this, TRUE, i9mm, i357, iBolt, iARGren, iRock, iUranium);
 //			ALERT(at_console, "Keeping %s. (id = %d)\n", m_rgpPlayerItems[i]->pszName(), m_rgpPlayerItems[i]->m_iId);
 		}
 	}
@@ -1023,10 +1040,12 @@ entvars_t *g_pevLastInflictor;  // Set in combat.cpp.  Used to pass the damage i
 void CBasePlayer::Killed( entvars_t *pevAttacker, int iGib )
 {
 	CSound *pSound;
+	FireTargets( "game_playerdie", this, this, USE_TOGGLE, 0 );
 
 	// Holster weapon immediately, to allow it to cleanup
 	if ( m_pActiveItem )
 		m_pActiveItem->Holster( );
+		m_pNextItem = NULL;
 
 	g_pGameRules->PlayerKilled( this, pevAttacker, g_pevLastInflictor );
 
@@ -1284,6 +1303,10 @@ all the ammo we have into the ammo vars.
 void CBasePlayer::TabulateAmmo()
 {
 	ammo_9mm = AmmoInventory( GetAmmoIndex( "9mm" ) );
+	ammo_44 = AmmoInventory( GetAmmoIndex( "44" ) );
+	ammo_556mm = AmmoInventory( GetAmmoIndex( "556mm" ) );
+	ammo_45ACP = AmmoInventory( GetAmmoIndex( "45ACP" ) );
+	ammo_14mm = AmmoInventory( GetAmmoIndex( "14mm" ) );
 	ammo_357 = AmmoInventory( GetAmmoIndex( "357" ) );
 	ammo_argrens = AmmoInventory( GetAmmoIndex( "ARgrenades" ) );
 	ammo_bolts = AmmoInventory( GetAmmoIndex( "bolts" ) );
@@ -1946,7 +1969,7 @@ void CBasePlayer::UpdateStatusBar()
 
 
 #define CLIMB_SHAKE_FREQUENCY	22	// how many frames in between screen shakes when climbing
-#define	MAX_CLIMB_SPEED			200	// fastest vertical climbing speed possible
+#define	MAX_CLIMB_SPEED			140	// fastest vertical climbing speed possible
 #define	CLIMB_SPEED_DEC			15	// climbing deceleration rate
 #define	CLIMB_PUNCH_X			-7  // how far to 'punch' client X axis when climbing
 #define CLIMB_PUNCH_Z			7	// how far to 'punch' client Z axis when climbing
@@ -1959,6 +1982,8 @@ void CBasePlayer::PreThink(void)
 	// UNDONE: Do we need auto-repeat?
 	m_afButtonPressed =  buttonsChanged & pev->button;		// The ones that changed and are now down are "pressed"
 	m_afButtonReleased = buttonsChanged & (~pev->button);	// The ones that changed and aren't down are "released"
+
+	m_killedByRailgunCount = 0;
 
 	g_pGameRules->PlayerThink( this );
 
@@ -1978,6 +2003,17 @@ void CBasePlayer::PreThink(void)
 	else
 		m_iHideHUD |= HIDEHUD_FLASHLIGHT;
 
+	if (m_bResetViewEntity)
+	{
+		m_bResetViewEntity = false;
+
+		CBaseEntity* viewEntity = m_hViewEntity;
+
+		if (viewEntity)
+		{
+			SET_VIEW(edict(), viewEntity->edict());
+		}
+	}
 
 	// JOHN: checks if new client data (for HUD and view control) needs to be sent to the client
 	UpdateClientData();
@@ -2170,7 +2206,7 @@ void CBasePlayer::CheckTimeBasedDamage()
 		return;
 
 	// only check for time based damage approx. every 2 seconds
-	if (abs(gpGlobals->time - m_tbdPrev) < 2.0)
+	if (fabs(gpGlobals->time - m_tbdPrev) < 2.0)
 		return;
 	
 	m_tbdPrev = gpGlobals->time;
@@ -2672,11 +2708,6 @@ void CBasePlayer::PostThink()
 	if (!IsAlive())
 		goto pt_end;
 
-	#ifdef XENWARRIOR
-	if (FlashlightIsOn())
-		UTIL_ScreenFade(this, Vector(150, 20, 150), 0, 0, 100, FFADE_STAYOUT );
-	#endif
-
 	// Handle Tank controlling
 	if ( m_pTank != NULL )
 	{ // if they've moved too far from the gun,  or selected a weapon, unuse the gun
@@ -2990,6 +3021,7 @@ void CBasePlayer::Spawn( void )
 
 	pev->fov = m_iFOV				= 0;// init field of view.
 	m_iClientFOV		= -1; // make sure fov reset is sent
+	m_ClientSndRoomtype = -1;
 
 	m_flNextDecalTime	= 0;// let this player decal as soon as he spawns.
 
@@ -3087,7 +3119,7 @@ void CBasePlayer :: Precache( void )
 
 	m_iClientBattery = -1;
 
-	m_iTrain = TRAIN_NEW;
+	m_iTrain |= TRAIN_NEW;
 
 	// Make sure any necessary user messages have been registered
 	LinkUserMessages();
@@ -3097,13 +3129,7 @@ void CBasePlayer :: Precache( void )
 	if ( gInitHUD )
 		m_fInitHUD = TRUE;
 
-#ifdef XENWARRIOR
-	g_fEnvFadeTime = 0;
-	if (FlashlightIsOn()) m_iLFlags |= LF_FLASH_RESUME;
-
-	if (CVAR_GET_FLOAT("v_dark"))
-		g_fEnvFadeTime = gpGlobals->time + 10;
-#endif
+	pev->fov = m_iFOV;		// Vit_amiN: restore the FOV on level change or map/saved game load
 }
 
 
@@ -3148,6 +3174,9 @@ int CBasePlayer::Restore( CRestore &restore )
 
 	pev->fixangle = TRUE;           // turn this way immediately
 
+	m_ClientSndRoomtype = -1;
+
+
 // Copied from spawn() for now
 	m_bloodColor	= BLOOD_COLOR_RED;
 
@@ -3184,6 +3213,8 @@ int CBasePlayer::Restore( CRestore &restore )
 	//			Barring that, we clear it out here instead of using the incorrect restored time value.
 	m_flNextAttack = UTIL_WeaponTimeBase();
 #endif
+
+	m_bResetViewEntity = true;
 
 	return status;
 }
@@ -3227,13 +3258,39 @@ void CBasePlayer::SelectNextItem( int iItem )
 		m_pActiveItem->Holster( );
 	}
 	
-	m_pActiveItem = pItem;
+	QueueItem(pItem);
 
 	if (m_pActiveItem)
 	{
 		m_pActiveItem->Deploy( );
 		m_pActiveItem->UpdateItemInfo( );
 	}
+}
+
+void CBasePlayer::QueueItem(CBasePlayerItem *pItem)
+{
+	if(!m_pActiveItem)// no active weapon
+	{
+		m_pActiveItem = pItem;
+		if (m_pNextItem)
+		{
+			m_pLastItem = m_pNextItem;
+			m_pNextItem = NULL;
+		}
+		return;
+	}
+
+   if(!m_pActiveItem)// no active weapon
+   {
+     m_pActiveItem = pItem;
+     return;// just set this item as active
+   }
+   else
+   {
+     m_pLastItem = m_pActiveItem;
+     m_pActiveItem = NULL;// clear current
+   }
+   m_pNextItem = pItem;// add item to queue
 }
 
 void CBasePlayer::SelectItem(const char *pstr)
@@ -3270,12 +3327,10 @@ void CBasePlayer::SelectItem(const char *pstr)
 
 	ResetAutoaim( );
 
-	// FIX, this needs to queue them up and delay
 	if (m_pActiveItem)
 		m_pActiveItem->Holster( );
 	
-	m_pLastItem = m_pActiveItem;
-	m_pActiveItem = pItem;
+	QueueItem(pItem);
 
 	if (m_pActiveItem)
 	{
@@ -3284,10 +3339,14 @@ void CBasePlayer::SelectItem(const char *pstr)
 	}
 }
 
-
 void CBasePlayer::SelectLastItem(void)
 {
-	if (!m_pLastItem)
+	if (m_pNextItem)
+	{
+		return;
+	}
+
+	if ( !m_pLastItem || !m_pLastItem->CanDeploy() )
 	{
 		return;
 	}
@@ -3303,11 +3362,13 @@ void CBasePlayer::SelectLastItem(void)
 	if (m_pActiveItem)
 		m_pActiveItem->Holster( );
 	
-	CBasePlayerItem *pTemp = m_pActiveItem;
-	m_pActiveItem = m_pLastItem;
-	m_pLastItem = pTemp;
-	m_pActiveItem->Deploy( );
-	m_pActiveItem->UpdateItemInfo( );
+	QueueItem(m_pLastItem);
+
+	if (m_pActiveItem)
+	{
+	  m_pActiveItem->Deploy( );
+	  m_pActiveItem->UpdateItemInfo( );
+	}
 }
 
 //==============================================
@@ -3479,11 +3540,7 @@ CBaseEntity *FindEntityForward( CBaseEntity *pMe )
 
 BOOL CBasePlayer :: FlashlightIsOn( void )
 {
-#ifdef XENWARRIOR
-	return FBitSet(pev->effects, EF_BRIGHTLIGHT);
-#else
 	return FBitSet(pev->effects, EF_DIMLIGHT);
-#endif
 }
 
 
@@ -3494,52 +3551,86 @@ void CBasePlayer :: FlashlightTurnOn( void )
 		return;
 	}
 
-#ifdef XENWARRIOR
-	if (g_fEnvFadeTime > gpGlobals->time)
-	{
-		return;
-	}
-#endif
-
 	if ( (pev->weapons & (1<<WEAPON_SUIT)) )
 	{
+		NVGTurnOff(false);
 		EMIT_SOUND_DYN( ENT(pev), CHAN_WEAPON, SOUND_FLASHLIGHT_ON, 1.0, ATTN_NORM, 0, PITCH_NORM );
-
-#ifdef XENWARRIOR
-		SetBits(pev->effects, EF_BRIGHTLIGHT);
-		pev->fov = m_iFOV = 90;
-#else
-		SetBits(pev->effects, EF_DIMLIGHT);
-		MESSAGE_BEGIN( MSG_ONE, gmsgFlashlight, NULL, pev );
-		WRITE_BYTE(1);
-		WRITE_BYTE(m_iFlashBattery);
-		MESSAGE_END();
-#endif
-
-		m_flFlashLightTime = FLASH_DRAIN_TIME + gpGlobals->time;
-
+		SetBits( pev->effects, EF_DIMLIGHT );
+		UpdateSuitLightBattery(true);
 	}
 }
 
 
-void CBasePlayer :: FlashlightTurnOff( void )
+void CBasePlayer :: FlashlightTurnOff( bool playOffSound )
 {
 	if (FlashlightIsOn())
-		EMIT_SOUND_DYN( ENT(pev), CHAN_WEAPON, SOUND_FLASHLIGHT_OFF, 1.0, ATTN_NORM, 0, PITCH_NORM );
-#ifdef XENWARRIOR
-    ClearBits(pev->effects, EF_BRIGHTLIGHT);
-	UTIL_ScreenFade(this, Vector(150, 50, 50), 0, 0, 100, FFADE_IN );
-	pev->fov = m_iFOV = 0;
-#else
-    ClearBits(pev->effects, EF_DIMLIGHT);
+	{
+		if (playOffSound)
+			EMIT_SOUND_DYN( ENT(pev), CHAN_WEAPON, SOUND_FLASHLIGHT_OFF, 1.0, ATTN_NORM, 0, PITCH_NORM );
+		ClearBits( pev->effects, EF_DIMLIGHT );
+		UpdateSuitLightBattery(false);
+	}
+}
+
+void CBasePlayer::UpdateSuitLightBattery(bool on)
+{
 	MESSAGE_BEGIN( MSG_ONE, gmsgFlashlight, NULL, pev );
-		WRITE_BYTE(0);
-		WRITE_BYTE(m_iFlashBattery);
+		WRITE_BYTE( on ? 1 : 0 );
+		WRITE_BYTE( m_iFlashBattery );
 	MESSAGE_END();
-#endif
 
 	m_flFlashLightTime = FLASH_CHARGE_TIME + gpGlobals->time;
+}
 
+void CBasePlayer::NVGToggle()
+{
+	if (NVGIsOn())
+	{
+		NVGTurnOff();
+	}
+	else
+	{
+		NVGTurnOn();
+	}
+}
+
+void CBasePlayer::NVGTurnOn()
+{
+	if( !HasNVG() || !g_pGameRules->FAllowFlashlight() )
+	{
+		return;
+	}
+
+	if (!m_fNVGisON)
+	{
+		FlashlightTurnOff(false);
+		EMIT_SOUND_DYN( ENT( pev ), CHAN_WEAPON, SOUND_NVG_ON, 1.0, ATTN_NORM, 0, PITCH_NORM );
+
+		m_fNVGisON = TRUE;
+		MESSAGE_BEGIN( MSG_ONE, gmsgNightvision, NULL, pev );
+			WRITE_BYTE( 1 );
+		MESSAGE_END();
+
+		UpdateSuitLightBattery(true);
+	}
+}
+
+void CBasePlayer::NVGTurnOff(bool playOffSound)
+{
+	if (m_fNVGisON)
+	{
+		if (playOffSound)
+		{
+			EMIT_SOUND_DYN( ENT( pev ), CHAN_WEAPON, SOUND_NVG_OFF, 1.0, ATTN_NORM, 0, PITCH_NORM );
+		}
+
+		m_fNVGisON = FALSE;
+		MESSAGE_BEGIN( MSG_ONE, gmsgNightvision, NULL, pev );
+			WRITE_BYTE( 0 );
+		MESSAGE_END();
+
+		UpdateSuitLightBattery(false);
+	}
 }
 
 /*
@@ -3555,6 +3646,8 @@ void CBasePlayer :: ForceClientDllUpdate( void )
 {
 	m_iClientHealth  = -1;
 	m_iClientBattery = -1;
+	m_ClientSndRoomtype = -1;
+	m_iClientFOV = -1;
 	m_iTrain |= TRAIN_NEW;  // Force new train message.
 	m_fWeapon = FALSE;          // Force weapon send
 	m_fKnownItem = FALSE;    // Force weaponinit messages.
@@ -3570,7 +3663,6 @@ void CBasePlayer :: ForceClientDllUpdate( void )
 ImpulseCommands
 ============
 */
-extern float g_flWeaponCheat;
 
 void CBasePlayer::ImpulseCommands( )
 {
@@ -3655,7 +3747,7 @@ void CBasePlayer::ImpulseCommands( )
 void CBasePlayer::CheatImpulseCommands( int iImpulse )
 {
 #if !defined( HLDEMO_BUILD )
-	if ( g_flWeaponCheat == 0.0 )
+	if ( g_enable_cheats->value == 0 )
 	{
 		return;
 	}
@@ -3705,31 +3797,33 @@ void CBasePlayer::CheatImpulseCommands( int iImpulse )
 	case 101:
 		gEvilImpulse101 = TRUE;
 		GiveNamedItem( "item_suit" );
-		GiveNamedItem( "item_battery" );
+		// Weapons
 		GiveNamedItem( "weapon_crowbar" );
-		GiveNamedItem( "weapon_9mmhandgun" );
-		GiveNamedItem( "ammo_9mmclip" );
-		GiveNamedItem( "weapon_shotgun" );
-		GiveNamedItem( "ammo_buckshot" );
-		GiveNamedItem( "weapon_9mmAR" );
-		GiveNamedItem( "ammo_9mmAR" );
-		GiveNamedItem( "ammo_ARgrenades" );
-		GiveNamedItem( "weapon_handgrenade" );
-		GiveNamedItem( "weapon_tripmine" );
-#ifndef OEM_BUILD
+		GiveNamedItem( "weapon_pipewrench" );
+		GiveNamedItem( "weapon_glock" );
+		GiveNamedItem( "weapon_44desert_eagle" );
 		GiveNamedItem( "weapon_357" );
-		GiveNamedItem( "ammo_357" );
-		GiveNamedItem( "weapon_crossbow" );
-		GiveNamedItem( "ammo_crossbow" );
-		GiveNamedItem( "weapon_egon" );
-		GiveNamedItem( "weapon_gauss" );
-		GiveNamedItem( "ammo_gaussclip" );
+		GiveNamedItem( "weapon_m4a1" );
+		GiveNamedItem( "weapon_smg" );
+		GiveNamedItem( "weapon_shotgun" );
+		GiveNamedItem( "weapon_barrett_m82a1" );
 		GiveNamedItem( "weapon_rpg" );
-		GiveNamedItem( "ammo_rpgclip" );
+		GiveNamedItem( "weapon_handgrenade" );
 		GiveNamedItem( "weapon_satchel" );
 		GiveNamedItem( "weapon_snark" );
-		GiveNamedItem( "weapon_hornetgun" );
-#endif
+		GiveNamedItem( "weapon_gauss" );
+		// Ammo
+		GiveNamedItem( "ammo_9mmclip" );
+		GiveNamedItem( "ammo_556mmclip" );
+		GiveNamedItem( "ammo_45ACPclip" );
+		GiveNamedItem( "ammo_ARgrenades" );
+		GiveNamedItem( "ammo_14mmclip" );
+		GiveNamedItem( "ammo_44clip" );
+		GiveNamedItem( "ammo_357" );
+		GiveNamedItem( "ammo_buckshot" );
+		GiveNamedItem( "ammo_rpgclip" );
+		GiveNamedItem( "ammo_gaussclip" );
+
 		gEvilImpulse101 = FALSE;
 		break;
 
@@ -4015,6 +4109,16 @@ void CBasePlayer::ItemPreFrame()
 		return;
 	}
 
+if (!m_pActiveItem)
+{
+   if(m_pNextItem)
+   {
+     m_pActiveItem = m_pNextItem;
+     m_pActiveItem->Deploy();
+     m_pActiveItem->UpdateItemInfo();
+     m_pNextItem = NULL;
+   }
+}
 	if (!m_pActiveItem)
 		return;
 
@@ -4036,6 +4140,8 @@ void CBasePlayer::ItemPostFrame()
 	// check if the player is using a tank
 	if ( m_pTank != NULL )
 		return;
+	
+	ImpulseCommands();
 
 #if defined( CLIENT_WEAPONS )
     if ( m_flNextAttack > 0 )
@@ -4045,8 +4151,6 @@ void CBasePlayer::ItemPostFrame()
 	{
 		return;
 	}
-
-	ImpulseCommands();
 
 	if (!m_pActiveItem)
 		return;
@@ -4142,6 +4246,18 @@ void CBasePlayer :: UpdateClientData( void )
 
 		FireTargets( "game_playerspawn", this, this, USE_TOGGLE, 0 );
 
+		MESSAGE_BEGIN( MSG_ONE, gmsgFlashlight, NULL, pev );
+			WRITE_BYTE( FlashlightIsOn() || NVGIsOn() ? 1 : 0 );
+			WRITE_BYTE( m_iFlashBattery );
+		MESSAGE_END();
+
+		if (HasNVG())
+		{
+			MESSAGE_BEGIN( MSG_ONE, gmsgNightvision, NULL, pev );
+				WRITE_BYTE( NVGIsOn() ? 1 : 0 );
+			MESSAGE_END();
+		}
+
 		InitStatusBar();
 	}
 
@@ -4233,7 +4349,7 @@ void CBasePlayer :: UpdateClientData( void )
 	// Update Flashlight
 	if ((m_flFlashLightTime) && (m_flFlashLightTime <= gpGlobals->time))
 	{
-		if (FlashlightIsOn())
+		if (FlashlightIsOn() || NVGIsOn())
 		{
 			if (m_iFlashBattery)
 			{
@@ -4341,6 +4457,16 @@ void CBasePlayer :: UpdateClientData( void )
 	{
 		UpdateStatusBar();
 		m_flNextSBarUpdateTime = gpGlobals->time + 0.2;
+	}
+
+	// Send new room type to client.
+	if (m_ClientSndRoomtype != m_SndRoomtype)
+	{
+		m_ClientSndRoomtype = m_SndRoomtype;
+
+		MESSAGE_BEGIN(MSG_ONE, SVC_ROOMTYPE, NULL, edict());
+		WRITE_SHORT((short)m_SndRoomtype); // sequence number
+		MESSAGE_END();
 	}
 }
 
@@ -4824,10 +4950,51 @@ BOOL CBasePlayer :: SwitchWeapon( CBasePlayerItem *pWeapon )
 		m_pActiveItem->Holster( );
 	}
 
-	m_pActiveItem = pWeapon;
-	pWeapon->Deploy( );
+	QueueItem(pWeapon);
+
+	if (m_pActiveItem)// XWider: QueueItem sets it if we have no current weapopn
+	{
+	m_pActiveItem->Deploy( );
+	m_pActiveItem->UpdateItemInfo( );
+	}
 
 	return TRUE;
+}
+
+// Achievements
+void CBasePlayer::SetAchievement(const char* ID)
+{
+	if ( gmsgAchievement && IsNetClient() )
+	{
+		MESSAGE_BEGIN( MSG_ONE, gmsgAchievement, NULL, edict() );
+			WRITE_STRING( ID );
+		MESSAGE_END();
+	}
+}
+
+CBasePlayer* CBasePlayer::PlayerInstance(entvars_t* pev)
+{
+	if (!pev)
+		return NULL;
+	CBaseEntity* pEntity = CBaseEntity::Instance(pev);
+	if (pEntity->IsPlayer())
+		return (CBasePlayer*)pEntity;
+	return NULL;
+}
+
+void CBaseMonster::ScoreForHeadGib(entvars_t* pevAttacker)
+{
+	CBasePlayer* pPlayer = CBasePlayer::PlayerInstance(pevAttacker);
+	if (pPlayer)
+	{
+		pPlayer->m_decapitatedCount++;
+		if (pPlayer->m_decapitatedCount == ACH_DECAPITATION_COUNT)
+			pPlayer->SetAchievement("ACH_DECAPITATION");
+		else if (pPlayer->m_decapitatedCount == ACH_REDUNANT_COUNT)
+			pPlayer->SetAchievement("ACH_REDUNANT");
+		else if (pPlayer->m_decapitatedCount == ACH_NO_BRAINS_COUNT)
+			pPlayer->SetAchievement("ACH_NO_BRAINS");
+	}
 }
 
 //=========================================================
@@ -4915,6 +5082,9 @@ private:
 	int m_iTrip;
 	int m_iGren;
 	int m_iHornet;
+/*	int m_i44;
+	int m_i14mm;
+	int m_i45ACP;*/
 };
 
 LINK_ENTITY_TO_CLASS( player_weaponstrip, CStripWeapons );
@@ -4933,6 +5103,9 @@ TYPEDESCRIPTION	CStripWeapons::m_SaveData[] =
 	DEFINE_FIELD( CStripWeapons, m_iTrip, FIELD_INTEGER ),
 	DEFINE_FIELD( CStripWeapons, m_iGren, FIELD_INTEGER ),
 	DEFINE_FIELD( CStripWeapons, m_iHornet, FIELD_INTEGER ),
+/*	DEFINE_FIELD( CStripWeapons, m_i44, FIELD_INTEGER ),
+	DEFINE_FIELD( CStripWeapons, m_i14mm, FIELD_INTEGER ),
+	DEFINE_FIELD( CStripWeapons, m_i45ACP, FIELD_INTEGER ),*/
 };
 
 IMPLEMENT_SAVERESTORE( CStripWeapons, CPointEntity );
@@ -4999,6 +5172,21 @@ void CStripWeapons :: KeyValue( KeyValueData *pkvd )
 		m_iHornet = atoi(pkvd->szValue);
 		pkvd->fHandled = TRUE;
 	}
+/*	else if (FStrEq(pkvd->szKeyName, "desert_eagle"))
+	{
+		m_i44 = atoi(pkvd->szValue);
+		pkvd->fHandled = TRUE;
+	}
+	else if (FStrEq(pkvd->szKeyName, "barrett_m82a1"))
+	{
+		m_i14mm = atoi(pkvd->szValue);
+		pkvd->fHandled = TRUE;
+	}
+	else if (FStrEq(pkvd->szKeyName, "45ACP"))
+	{
+		m_i45ACP = atoi(pkvd->szValue);
+		pkvd->fHandled = TRUE;
+	}*/
 	else
 		CBaseEntity::KeyValue( pkvd );
 }

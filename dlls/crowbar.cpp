@@ -30,7 +30,7 @@ LINK_ENTITY_TO_CLASS( weapon_crowbar, CCrowbar );
 
 
 
-enum gauss_e {
+enum crowbar_e {
 	CROWBAR_IDLE = 0,
 	CROWBAR_DRAW,
 	CROWBAR_HOLSTER,
@@ -39,7 +39,8 @@ enum gauss_e {
 	CROWBAR_ATTACK2MISS,
 	CROWBAR_ATTACK2HIT,
 	CROWBAR_ATTACK3MISS,
-	CROWBAR_ATTACK3HIT
+	CROWBAR_ATTACK3HIT,
+	CROWBAR_ATTACK_SPECIAL
 };
 
 
@@ -78,22 +79,36 @@ int CCrowbar::GetItemInfo(ItemInfo *p)
 	p->iMaxAmmo2 = -1;
 	p->iMaxClip = WEAPON_NOCLIP;
 	p->iSlot = 0;
-	p->iPosition = 0;
+	p->iPosition = 1;
 	p->iId = WEAPON_CROWBAR;
 	p->iWeight = CROWBAR_WEIGHT;
 	return 1;
 }
 
 
+int CCrowbar::AddToPlayer( CBasePlayer *pPlayer )
+{
+	if ( CBasePlayerWeapon::AddToPlayer( pPlayer ) )
+	{
+		MESSAGE_BEGIN( MSG_ONE, gmsgWeapPickup, NULL, pPlayer->pev );
+			WRITE_BYTE( m_iId );
+		MESSAGE_END();
+
+		return TRUE;
+	}
+	return FALSE;
+}
 
 BOOL CCrowbar::Deploy( )
 {
+	g_engfuncs.pfnSetClientMaxspeed(m_pPlayer->edict(), 230 );
 	return DefaultDeploy( "models/v_crowbar.mdl", "models/p_crowbar.mdl", CROWBAR_DRAW, "crowbar" );
 }
 
 void CCrowbar::Holster( int skiplocal /* = 0 */ )
 {
-	m_pPlayer->m_flNextAttack = UTIL_WeaponTimeBase() + 0.5;
+	g_engfuncs.pfnSetClientMaxspeed(m_pPlayer->edict(), 230 );
+	m_pPlayer->m_flNextAttack = UTIL_WeaponTimeBase() + 0.35;
 	SendWeaponAnim( CROWBAR_HOLSTER );
 }
 
@@ -151,7 +166,6 @@ void CCrowbar::PrimaryAttack()
 		SetNextThink( 0.1 );
 	}
 }
-
 
 void CCrowbar::Smack( )
 {
@@ -250,7 +264,7 @@ int CCrowbar::Swing( int fFirst )
 
 		if (pEntity)
 		{
-			if ( pEntity->Classify() != CLASS_NONE && pEntity->Classify() != CLASS_MACHINE )
+			if( pEntity->Classify() != CLASS_NONE && !pEntity->IsMachine() )
 			{
 				// play thwack or smack sound
 				switch( RANDOM_LONG(0,2) )
@@ -316,6 +330,3 @@ int CCrowbar::Swing( int fFirst )
 	}
 	return fDidHit;
 }
-
-
-

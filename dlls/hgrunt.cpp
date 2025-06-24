@@ -41,6 +41,7 @@
 #include	"soundent.h"
 #include	"effects.h"
 #include	"customentity.h"
+#include	"weapons.h"
 #include	"scripted.h" //LRC
 
 int g_fGruntQuestion;				// true if an idle grunt asked a question. Cleared when someone answers.
@@ -59,21 +60,24 @@ extern DLL_GLOBAL int		g_iSkillLevel;
 #define HGRUNT_MINIMUM_HEADSHOT_DAMAGE	15 // must do at least this much damage in one shot to head to score a headshot kill
 #define	HGRUNT_SENTENCE_VOLUME			(float)0.35 // volume of grunt sentences
 
-#define HGRUNT_9MMAR				( 1 << 0)
+#define HGRUNT_M4A1					( 1 << 0)
 #define HGRUNT_HANDGRENADE			( 1 << 1)
 #define HGRUNT_GRENADELAUNCHER		( 1 << 2)
 #define HGRUNT_SHOTGUN				( 1 << 3)
+#define HGRUNT_SMG					( 1 << 4)
 
 #define HEAD_GROUP					1
 #define HEAD_GRUNT					0
 #define HEAD_COMMANDER				1
 #define HEAD_SHOTGUN				2
 #define HEAD_M203					3
+#define HEAD_HEADLESS				4
 
 #define GUN_GROUP					2
-#define GUN_MP5						0
+#define GUN_M4A1					0
 #define GUN_SHOTGUN					1
-#define GUN_NONE					2
+#define GUN_SMG						2
+#define GUN_NONE					3
 
 //=========================================================
 // Monster's Anim Events Go Here
@@ -145,9 +149,12 @@ public:
 	Vector GetGunPosition( void );
 	void Shoot ( void );
 	void Shotgun ( void );
+	void SMG ( void );
 	void PrescheduleThink ( void );
 	void GibMonster( void );
 	void SpeakSentence( void );
+	BOOL HeadGibbed;
+	int BuckshotCount;
 
 	int	Save( CSave &save ); 
 	int Restore( CRestore &restore );
@@ -173,6 +180,7 @@ public:
 	float m_flLastEnemySightTime;
 
 	Vector	m_vecTossVelocity;
+	Vector	HeadPos;
 
 	BOOL	m_fThrowGrenade;
 	BOOL	m_fStanding;
@@ -183,6 +191,7 @@ public:
 
 	int		m_iBrassShell;
 	int		m_iShotgunShell;
+	int		m_iSMGShell;
 
 	int		m_iSentence;
 
@@ -282,7 +291,7 @@ void CHGrunt :: GibMonster ( void )
 	Vector	vecGunPos;
 	Vector	vecGunAngles;
 
-	if ( GetBodygroup( 2 ) != 2 && !(pev->spawnflags & SF_MONSTER_NO_WPN_DROP))
+	if ( GetBodygroup( 2 ) != 3 && !(pev->spawnflags & SF_MONSTER_NO_WPN_DROP))
 	{// throw a gun if the grunt has one
 		GetAttachment( 0, vecGunPos, vecGunAngles );
 		
@@ -291,9 +300,13 @@ void CHGrunt :: GibMonster ( void )
 		{
 			pGun = DropItem( "weapon_shotgun", vecGunPos, vecGunAngles );
 		}
-		else
+		else if (FBitSet( pev->weapons, HGRUNT_SMG ))
 		{
-			pGun = DropItem( "weapon_9mmAR", vecGunPos, vecGunAngles );
+			pGun = DropItem( "weapon_smg", vecGunPos, vecGunAngles );
+		}
+		else 
+		{
+			pGun = DropItem( "weapon_m4a1", vecGunPos, vecGunAngles );
 		}
 		if ( pGun )
 		{
@@ -311,6 +324,9 @@ void CHGrunt :: GibMonster ( void )
 			}
 		}
 	}
+
+	if ( !HeadGibbed )	
+	GibHeadMonster( Vector ( pev->origin.x, pev->origin.y, pev->origin.z + 32 ), TRUE );
 
 	CBaseMonster :: GibMonster();
 }
@@ -606,23 +622,39 @@ BOOL CHGrunt :: CheckRangeAttack2 ( float flDot, float flDist )
 //=========================================================
 void CHGrunt :: TraceAttack( entvars_t *pevAttacker, float flDamage, Vector vecDir, TraceResult *ptr, int bitsDamageType)
 {
-	// check for helmet shot
-	if (ptr->iHitgroup == 11)
+	if ( ptr->iHitgroup == 11 && (bitsDamageType & (DMG_BULLET | DMG_CLUB)))
 	{
-		// make sure we're wearing one
-		if (GetBodygroup( 1 ) == HEAD_GRUNT && (bitsDamageType & (DMG_BULLET | DMG_SLASH | DMG_BLAST | DMG_CLUB)))
+		if ( (GetBodygroup( 1 ) == HEAD_GRUNT) || (GetBodygroup( 1 ) == HEAD_M203) ) 
 		{
-			// absorb damage
-			flDamage -= 20;
-			if (flDamage <= 0)
+			if (flDamage < 30 && !HeadGibbed )
 			{
 				UTIL_Ricochet( ptr->vecEndPos, 1.0 );
 				flDamage = 0.01;
 			}
+			else
+				ptr->iHitgroup = HITGROUP_HEAD;
 		}
-		// it's head shot anyways
-		ptr->iHitgroup = HITGROUP_HEAD;
+		else
+			ptr->iHitgroup = HITGROUP_HEAD;
 	}
+
+	if	( ptr->iHitgroup == 1 )
+	{
+		if ( (bitsDamageType & DMG_BULLET) && flDamage == gSkillData.plrDmgBuckshot )
+			BuckshotCount++;
+
+		Vector HeadPos = ptr->vecEndPos;
+
+		if ( pev->health <= flDamage * gSkillData.monHead && flDamage >= 10 && !HeadGibbed )
+		{
+			SetBodygroup( HEAD_GROUP, HEAD_HEADLESS );
+
+			GibHeadMonster( ptr->vecEndPos, TRUE );
+			HeadGibbed = TRUE;
+			ScoreForHeadGib(pevAttacker);
+		}
+	}
+
 	CSquadMonster::TraceAttack( pevAttacker, flDamage, vecDir, ptr, bitsDamageType );
 }
 
@@ -636,6 +668,16 @@ int CHGrunt :: TakeDamage( entvars_t *pevInflictor, entvars_t *pevAttacker, floa
 {
 	Forget( bits_MEMORY_INCOVER );
 
+	if ( !HeadGibbed && (pev->health <= flDamage && BuckshotCount >= 5) ) // Hack to handle shotgun shells as each shell is a separate TraceAttack
+	{
+		SetBodygroup( HEAD_GROUP, HEAD_HEADLESS );
+
+		GibHeadMonster( HeadPos, TRUE );
+		HeadGibbed = TRUE;
+		ScoreForHeadGib(pevAttacker);
+	}
+
+	BuckshotCount = 0;
 	return CSquadMonster :: TakeDamage ( pevInflictor, pevAttacker, flDamage, bitsDamageType );
 }
 
@@ -679,7 +721,7 @@ void CHGrunt :: SetYawSpeed ( void )
 		ys = 30;
 		break;
 	default:
-		ys = 90;
+		ys = 130;
 		break;
 	}
 
@@ -815,7 +857,7 @@ void CHGrunt :: Shoot ( void )
 }
 
 //=========================================================
-// Shoot
+// Shotgun
 //=========================================================
 void CHGrunt :: Shotgun ( void )
 {
@@ -840,7 +882,35 @@ void CHGrunt :: Shotgun ( void )
 	Vector angDir = UTIL_VecToAngles( vecShootDir );
 	SetBlending( 0, angDir.x );
 }
+//=========================================================
+// SMG
+//=========================================================
+void CHGrunt :: SMG ( void )
+{
+	if (m_hEnemy == NULL && m_pCine == NULL) //LRC - scripts may fire when you have no enemy
+	{
+		return;
+	}
 
+	Vector vecShootOrigin = GetGunPosition();
+	Vector vecShootDir = ShootAtEnemy( vecShootOrigin );
+
+	if (m_cAmmoLoaded > 0)
+	{
+		UTIL_MakeVectors ( pev->angles );
+
+		Vector	vecShellVelocity = gpGlobals->v_right * RANDOM_FLOAT(40,90) + gpGlobals->v_up * RANDOM_FLOAT(75,200) + gpGlobals->v_forward * RANDOM_FLOAT(-40, 40);
+		EjectBrass ( vecShootOrigin - vecShootDir * 24, vecShellVelocity, pev->angles.y, m_iSMGShell, TE_BOUNCE_SHELL); 
+		FireBullets(1, vecShootOrigin, vecShootDir, VECTOR_CONE_15DEGREES, 2048, BULLET_PLAYER_45ACP ); // shoot +-5 degrees
+
+		pev->effects |= EF_MUZZLEFLASH;
+	
+		m_cAmmoLoaded--;// take away a bullet!
+	}
+
+	Vector angDir = UTIL_VecToAngles( vecShootDir );
+	SetBlending( 0, angDir.x );
+}
 //=========================================================
 // HandleAnimEvent - catches the monster-specific messages
 // that occur when tagged animation frames are played.
@@ -856,33 +926,44 @@ void CHGrunt :: HandleAnimEvent( MonsterEvent_t *pEvent )
 			{
 			if (pev->spawnflags & SF_MONSTER_NO_WPN_DROP) break; //LRC
 
-			Vector	vecGunPos;
-			Vector	vecGunAngles;
-
-			GetAttachment( 0, vecGunPos, vecGunAngles );
-
-			// switch to body group with no gun.
-			SetBodygroup( GUN_GROUP, GUN_NONE );
-
-			// now spawn a gun.
-			if (FBitSet( pev->weapons, HGRUNT_SHOTGUN ))
+			if ( GetBodygroup( GUN_GROUP ) != GUN_NONE )
 			{
-				 DropItem( "weapon_shotgun", vecGunPos, vecGunAngles );
-			}
-			else
-			{
-				 DropItem( "weapon_9mmAR", vecGunPos, vecGunAngles );
-			}
-			if (FBitSet( pev->weapons, HGRUNT_GRENADELAUNCHER ))
-			{
-				DropItem( "ammo_ARgrenades", BodyTarget( pev->origin ), vecGunAngles );
+				Vector	vecGunPos;
+				Vector	vecGunAngles;
+
+				GetAttachment( 0, vecGunPos, vecGunAngles );
+
+				// switch to body group with no gun.
+				SetBodygroup( GUN_GROUP, GUN_NONE );
+
+				// now spawn a gun.
+				if (FBitSet( pev->weapons, HGRUNT_SHOTGUN ))
+				{
+					DropItem( "weapon_shotgun", vecGunPos, vecGunAngles );
+				}
+				else if (FBitSet( pev->weapons, HGRUNT_SMG ))
+				{
+					DropItem( "weapon_smg", vecGunPos, vecGunAngles );
+				}
+				else
+				{
+					DropItem( "weapon_m4a1", vecGunPos, vecGunAngles );
+				}
+				if (FBitSet( pev->weapons, HGRUNT_GRENADELAUNCHER ))
+				{
+					DropItem( "ammo_ARgrenades", BodyTarget( pev->origin ), vecGunAngles );
+				}
 			}
 
 			}
 			break;
 
 		case HGRUNT_AE_RELOAD:
-			EMIT_SOUND( ENT(pev), CHAN_WEAPON, "hgrunt/gr_reload1.wav", 1, ATTN_NORM );
+			if (FBitSet( pev->weapons, HGRUNT_M4A1 | HGRUNT_SMG ))
+				EMIT_SOUND( ENT(pev), CHAN_WEAPON, "hgrunt/gr_reload1.wav", 1, ATTN_NORM );
+			else
+				EMIT_SOUND( ENT(pev), CHAN_WEAPON, "hgrunt/gr_reload2.wav", 1, ATTN_NORM );
+
 			m_cAmmoLoaded = m_cClipSize;
 			ClearConditions(bits_COND_NO_AMMO_LOADED);
 			break;
@@ -950,7 +1031,7 @@ void CHGrunt :: HandleAnimEvent( MonsterEvent_t *pEvent )
 
 		case HGRUNT_AE_BURST1:
 		{
-			if ( FBitSet( pev->weapons, HGRUNT_9MMAR ))
+			if ( FBitSet( pev->weapons, HGRUNT_M4A1 ))
 			{
 				// the first round of the three round burst plays the sound and puts a sound in the world sound list.
 				if (m_cAmmoLoaded > 0)
@@ -971,6 +1052,19 @@ void CHGrunt :: HandleAnimEvent( MonsterEvent_t *pEvent )
 
 				Shoot();
 			}
+			else if ( FBitSet( pev->weapons, HGRUNT_SMG ))
+			{
+				SMG( );
+
+				if ( RANDOM_LONG(0,1) )
+					{
+						EMIT_SOUND( ENT(pev), CHAN_WEAPON, "hgrunt/gr_smgburst1.wav", 1, ATTN_NORM );
+					}
+					else
+					{
+						EMIT_SOUND( ENT(pev), CHAN_WEAPON, "hgrunt/gr_smgburst2.wav", 1, ATTN_NORM );
+					}
+			}
 			else
 			{
 				Shotgun( );
@@ -978,13 +1072,19 @@ void CHGrunt :: HandleAnimEvent( MonsterEvent_t *pEvent )
 				EMIT_SOUND(ENT(pev), CHAN_WEAPON, "weapons/sbarrel1.wav", 1, ATTN_NORM );
 			}
 		
+		
 			CSoundEnt::InsertSound ( bits_SOUND_COMBAT, pev->origin, 384, 0.3 );
 		}
 		break;
 
 		case HGRUNT_AE_BURST2:
 		case HGRUNT_AE_BURST3:
+			if ( FBitSet( pev->weapons, HGRUNT_M4A1 ))
 			Shoot();
+			else if ( FBitSet( pev->weapons, HGRUNT_SHOTGUN ))
+			Shotgun();
+			else if ( FBitSet( pev->weapons, HGRUNT_SMG ))
+			SMG();
 			break;
 
 		case HGRUNT_AE_KICK:
@@ -1053,15 +1153,26 @@ void CHGrunt :: Spawn()
 	if (pev->weapons == 0)
 	{
 		// initialize to original values
-		pev->weapons = HGRUNT_9MMAR | HGRUNT_HANDGRENADE;
+		pev->weapons = HGRUNT_SMG | HGRUNT_HANDGRENADE;
 		// pev->weapons = HGRUNT_SHOTGUN;
 		// pev->weapons = HGRUNT_9MMAR | HGRUNT_GRENADELAUNCHER;
+	}
+
+	if (FBitSet( pev->weapons, HGRUNT_M4A1 ))
+	{
+		SetBodygroup( GUN_GROUP, GUN_M4A1 );
+		m_cClipSize		= 30;
 	}
 
 	if (FBitSet( pev->weapons, HGRUNT_SHOTGUN ))
 	{
 		SetBodygroup( GUN_GROUP, GUN_SHOTGUN );
 		m_cClipSize		= 8;
+	}
+	else if (FBitSet( pev->weapons, HGRUNT_SMG ))
+	{
+		SetBodygroup( GUN_GROUP, GUN_SMG );
+		m_cClipSize		= 60;
 	}
 	else
 	{
@@ -1078,11 +1189,15 @@ void CHGrunt :: Spawn()
 	{
 		SetBodygroup( HEAD_GROUP, HEAD_SHOTGUN);
 	}
+
 	else if (FBitSet( pev->weapons, HGRUNT_GRENADELAUNCHER ))
 	{
 		SetBodygroup( HEAD_GROUP, HEAD_M203 );
 		pev->skin = 1; // alway dark skin
 	}
+	
+	if ( GetBodygroup( 1 ) == HEAD_HEADLESS )
+	SetBodygroup( HEAD_GROUP, HEAD_SHOTGUN);
 
 	CTalkMonster::g_talkWaitTime = 0;
 
@@ -1103,7 +1218,10 @@ void CHGrunt :: Precache()
 
 	PRECACHE_SOUND( "hgrunt/gr_mgun1.wav" );
 	PRECACHE_SOUND( "hgrunt/gr_mgun2.wav" );
-	
+
+	PRECACHE_SOUND( "hgrunt/gr_smgburst1.wav" );
+	PRECACHE_SOUND( "hgrunt/gr_smgburst2.wav" );
+
 	PRECACHE_SOUND( "hgrunt/gr_die1.wav" );
 	PRECACHE_SOUND( "hgrunt/gr_die2.wav" );
 	PRECACHE_SOUND( "hgrunt/gr_die3.wav" );
@@ -1115,6 +1233,12 @@ void CHGrunt :: Precache()
 	PRECACHE_SOUND( "hgrunt/gr_pain5.wav" );
 
 	PRECACHE_SOUND( "hgrunt/gr_reload1.wav" );
+	PRECACHE_SOUND( "hgrunt/gr_reload2.wav" );
+
+	PRECACHE_SOUND( "hgrunt/gr_step1.wav" );
+	PRECACHE_SOUND( "hgrunt/gr_step2.wav" );
+	PRECACHE_SOUND( "hgrunt/gr_step3.wav" );
+	PRECACHE_SOUND( "hgrunt/gr_step4.wav" );
 
 	PRECACHE_SOUND( "weapons/glauncher.wav" );
 
@@ -1128,8 +1252,9 @@ void CHGrunt :: Precache()
 	else
 		m_voicePitch = 100;
 
-	m_iBrassShell = PRECACHE_MODEL ("models/shell.mdl");// brass shell
+	m_iBrassShell = PRECACHE_MODEL ("models/rifleshell.mdl");// brass shell
 	m_iShotgunShell = PRECACHE_MODEL ("models/shotgunshell.mdl");
+	m_iSMGShell = PRECACHE_MODEL ("models/45acp_shell.mdl");
 }	
 
 //=========================================================
@@ -1926,7 +2051,7 @@ void CHGrunt :: SetActivity ( Activity NewActivity )
 	{
 	case ACT_RANGE_ATTACK1:
 		// grunt is either shooting standing or shooting crouched
-		if (FBitSet( pev->weapons, HGRUNT_9MMAR))
+		if (FBitSet( pev->weapons, HGRUNT_M4A1))
 		{
 			if ( m_fStanding )
 			{
@@ -1937,6 +2062,19 @@ void CHGrunt :: SetActivity ( Activity NewActivity )
 			{
 				// get crouching shoot
 				iSequence = LookupSequence( "crouching_mp5" );
+			}
+		}
+		else if (FBitSet( pev->weapons, HGRUNT_SMG))
+		{
+			if ( m_fStanding )
+			{
+				// get aimable sequence
+				iSequence = LookupSequence( "standing_smg" );
+			}
+			else
+			{
+				// get crouching shoot
+				iSequence = LookupSequence( "crouching_smg" );
 			}
 		}
 		else
@@ -2498,6 +2636,7 @@ class CDeadHGrunt : public CBaseMonster
 {
 public:
 	void Spawn( void );
+	void GibMonster ( void );
 	int	Classify ( void ) { return	CLASS_HUMAN_MILITARY; }
 
 	void KeyValue( KeyValueData *pkvd );
@@ -2557,12 +2696,15 @@ void CDeadHGrunt :: Spawn( void )
 	switch( pev->weapons )
 	{
 	case 0: // MP5
-		SetBodygroup( GUN_GROUP, GUN_MP5 );
+		SetBodygroup( GUN_GROUP, GUN_M4A1 );
 		break;
 	case 1: // Shotgun
 		SetBodygroup( GUN_GROUP, GUN_SHOTGUN );
 		break;
-	case 2: // No gun
+	case 2: // SMG
+		SetBodygroup( GUN_GROUP, GUN_SMG );
+		break;
+	case 3: // No gun
 		SetBodygroup( GUN_GROUP, GUN_NONE );
 		break;
 	}
@@ -2587,5 +2729,14 @@ void CDeadHGrunt :: Spawn( void )
 		break;
 	}
 
+	if ( GetBodygroup( 1 ) == HEAD_HEADLESS )
+	SetBodygroup( HEAD_GROUP, HEAD_SHOTGUN);
+
 	MonsterInitDead();
+}
+
+void CDeadHGrunt :: GibMonster ( void )
+{
+	GibHeadMonster( Vector ( pev->origin.x, pev->origin.y, pev->origin.z + 16 ), TRUE );				 
+	CBaseMonster :: GibMonster( );
 }

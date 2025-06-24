@@ -371,9 +371,7 @@ CGrenade *CGrenade::ShootContact( entvars_t *pevOwner, Vector vecStart, Vector v
 	pGrenade->SetThink(&CGrenade:: DangerSoundThink );
 	pGrenade->SetNextThink( 0 );
 	
-	// Tumble in air
-	pGrenade->pev->avelocity.x = RANDOM_FLOAT ( -100, -500 );
-	
+	pGrenade->pev->spawnflags |= SF_GRENADE_IS_CONTACT;
 	// Explode on contact
 	pGrenade->SetTouch(&CGrenade:: ExplodeTouch );
 
@@ -409,9 +407,6 @@ CGrenade * CGrenade:: ShootTimed( entvars_t *pevOwner, Vector vecStart, Vector v
 		
 	pGrenade->pev->sequence = RANDOM_LONG( 3, 6 );
 	pGrenade->pev->framerate = 1.0;
-
-	// Tumble through the air
-	// pGrenade->pev->avelocity.x = -400;
 
 	pGrenade->pev->gravity = 0.5;
 	pGrenade->pev->friction = 0.8;

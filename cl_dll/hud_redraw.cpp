@@ -18,6 +18,7 @@
 #include <math.h>
 #include "hud.h"
 #include "cl_util.h"
+#include "hud_sprite.h"
 
 #include "vgui_TeamFortressViewport.h"
 
@@ -37,18 +38,20 @@ float HUD_GetFOV( void );
 
 extern cvar_t *sensitivity;
 
+extern cvar_t *hud_renderer;
+
 // Think
 void CHud::Think(void)
 {
-	int newfov;
-	HUDLIST *pList = m_pHudList;
+    int newfov;
+    HUDLIST *pList = m_pHudList;
 
-	while (pList)
-	{
-		if (pList->p->m_iFlags & HUD_ACTIVE)
-			pList->p->Think();
-		pList = pList->pNext;
-	}
+    while (pList)
+    {
+        if (pList->p->m_iFlags & HUD_ACTIVE)
+            pList->p->Think();
+        pList = pList->pNext;
+    }
 
 	newfov = HUD_GetFOV();
 	if ( newfov == 0 )
@@ -96,7 +99,7 @@ int CHud :: Redraw( float flTime, int intermission )
 	m_fOldTime = m_flTime;	// save time of previous redraw
 	m_flTime = flTime;
 	m_flTimeDelta = (double)m_flTime - m_fOldTime;
-	static m_flShotTime = 0;
+	static float m_flShotTime = 0;
 
 	//LRC - handle fog fading effects. (is this the right place for it?)
 	if (g_fFadeDuration)
@@ -175,6 +178,7 @@ int CHud :: Redraw( float flTime, int intermission )
 			pList = pList->pNext;
 		}
 	}
+	m_Nightvision.Draw( flTime );
 
 	// are we in demo mode? do we need to draw the logo in the top corner?
 	if (m_iLogo)
@@ -219,11 +223,31 @@ int CHud :: Redraw( float flTime, int intermission )
 	}
 	*/
 
+	if (gHUD.m_iHardwareMode != 0 && hud_renderer && hud_renderer->value > 0.0f && m_pCvarCrosshair->value > 0.0f) {
+		HSPRITE crosshair = -1;
+		model_t *crosshair_model = NULL;
+		wrect_t crosshair_dimensions = {0, 0, 0, 0};
+		color24 crosshair_color = {0, 0, 0};
+
+		ScaledRenderer::Instance().QueryCrosshairInfo(&crosshair, &crosshair_model, &crosshair_dimensions, &crosshair_color);
+
+		int width = crosshair_dimensions.right - crosshair_dimensions.left;
+		int height = crosshair_dimensions.bottom - crosshair_dimensions.top;
+
+		int x = ScaledRenderer::Instance().ScreenWidthScaled() >> 1;
+		int y = ScaledRenderer::Instance().ScreenHeightScaled() >> 1;
+
+		ScaledRenderer::Instance().SPR_SetInternal(crosshair, crosshair_color.r, crosshair_color.g, crosshair_color.b);
+		ScaledRenderer::Instance().SPR_DrawInternal(0, x - 0.5f * width, y - 0.5f * height, -1.0f, -1.0f, &crosshair_dimensions, kRenderTransTexture);
+	}
+
 	return 1;
 }
 
 void ScaleColors( int &r, int &g, int &b, int a )
 {
+	a = min(a, 255);
+
 	float x = (float)a / 255;
 	r = (int)(r * x);
 	g = (int)(g * x);
@@ -238,7 +262,7 @@ int CHud :: DrawHudString(int xpos, int ypos, int iMaxX, char *szIt, int r, int 
 		int next = xpos + gHUD.m_scrinfo.charWidths[ *szIt ]; // variable-width fonts look cool
 		if ( next > iMaxX )
 			return xpos;
-
+		
 		TextMessageDrawChar( xpos, ypos, *szIt, r, g, b );
 		xpos = next;		
 	}
@@ -257,8 +281,9 @@ int CHud :: DrawHudNumberString( int xpos, int ypos, int iMinX, int iNumber, int
 // draws a string from right to left (right-aligned)
 int CHud :: DrawHudStringReverse( int xpos, int ypos, int iMinX, char *szString, int r, int g, int b )
 {
+	char *szIt;
 	// find the end of the string
-	for ( char *szIt = szString; *szIt != 0; szIt++ )
+	for ( szIt = szString; *szIt != 0; szIt++ )
 	{ // we should count the length?		
 	}
 
@@ -287,8 +312,8 @@ int CHud :: DrawHudNumber( int x, int y, int iFlags, int iNumber, int r, int g, 
 		if (iNumber >= 100)
 		{
 			 k = iNumber/100;
-			SPR_Set(GetSprite(m_HUD_number_0 + k), r, g, b );
-			SPR_DrawAdditive( 0, x, y, &GetSpriteRect(m_HUD_number_0 + k));
+			ScaledRenderer::Instance().SPR_Set( GetSprite( m_HUD_number_0 + k ), r, g, b );
+			ScaledRenderer::Instance().SPR_DrawAdditive( 0, x, y, &GetSpriteRect( m_HUD_number_0 + k ) );
 			x += iWidth;
 		}
 		else if (iFlags & (DHN_3DIGITS))
@@ -301,8 +326,8 @@ int CHud :: DrawHudNumber( int x, int y, int iFlags, int iNumber, int r, int g, 
 		if (iNumber >= 10)
 		{
 			k = (iNumber % 100)/10;
-			SPR_Set(GetSprite(m_HUD_number_0 + k), r, g, b );
-			SPR_DrawAdditive( 0, x, y, &GetSpriteRect(m_HUD_number_0 + k));
+			ScaledRenderer::Instance().SPR_Set( GetSprite( m_HUD_number_0 + k ), r, g, b );
+			ScaledRenderer::Instance().SPR_DrawAdditive( 0, x, y, &GetSpriteRect( m_HUD_number_0 + k ) );
 			x += iWidth;
 		}
 		else if (iFlags & (DHN_3DIGITS | DHN_2DIGITS))
@@ -313,13 +338,13 @@ int CHud :: DrawHudNumber( int x, int y, int iFlags, int iNumber, int r, int g, 
 
 		// SPR_Draw ones
 		k = iNumber % 10;
-		SPR_Set(GetSprite(m_HUD_number_0 + k), r, g, b );
-		SPR_DrawAdditive(0,  x, y, &GetSpriteRect(m_HUD_number_0 + k));
+		ScaledRenderer::Instance().SPR_Set( GetSprite( m_HUD_number_0 + k ), r, g, b );
+		ScaledRenderer::Instance().SPR_DrawAdditive( 0,  x, y, &GetSpriteRect( m_HUD_number_0 + k ) );
 		x += iWidth;
 	} 
 	else if (iFlags & DHN_DRAWZERO) 
 	{
-		SPR_Set(GetSprite(m_HUD_number_0), r, g, b );
+		ScaledRenderer::Instance().SPR_Set( GetSprite( m_HUD_number_0 ), r, g, b );
 
 		// SPR_Draw 100's
 		if (iFlags & (DHN_3DIGITS))
@@ -336,7 +361,7 @@ int CHud :: DrawHudNumber( int x, int y, int iFlags, int iNumber, int r, int g, 
 
 		// SPR_Draw ones
 		
-		SPR_DrawAdditive( 0,  x, y, &GetSpriteRect(m_HUD_number_0));
+		ScaledRenderer::Instance().SPR_DrawAdditive( 0,  x, y, &GetSpriteRect( m_HUD_number_0 ) );
 		x += iWidth;
 	}
 

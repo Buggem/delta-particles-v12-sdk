@@ -99,7 +99,8 @@ public:
 	float				m_flDistTooFar;	// if enemy farther away than this, bits_COND_ENEMY_TOOFAR set in CheckEnemy
 	float				m_flDistLook;	// distance monster sees (Default 2048)
 
-	int					m_iTriggerCondition;// for scripted AI, this is the condition that will cause the activation of the monster's TriggerTarget
+	short				m_iTriggerCondition;// for scripted AI, this is the condition that will cause the activation of the monster's TriggerTarget
+	short				m_iTriggerAltCondition;
 	string_t			m_iszTriggerTarget;// name of target that should be fired. 
 
 	Vector				m_HackedGunPos;	// HACK until we can query end of gun
@@ -134,6 +135,7 @@ public:
 	void Listen ( void );
 
 	virtual BOOL	IsAlive( void ) { return (pev->deadflag != DEAD_DEAD); }
+	BOOL IsFullyAlive();
 	virtual BOOL	ShouldFadeOnDeath( void );
 
 // Basic Monster AI functions
@@ -282,7 +284,8 @@ public:
 		CBaseEntity *CheckTraceHullAttack( float flDist, int iDamage, int iDmgType );
 		BOOL FacingIdeal( void );
 
-		BOOL FCheckAITrigger( void );// checks and, if necessary, fires the monster's trigger target. 
+		BOOL FCheckAITrigger( void );// checks and, if necessary, fires the monster's trigger target.
+		BOOL FCheckAITrigger( short condition );// checks and, if necessary, fires the monster's trigger target.
 		BOOL NoFriendlyFire( void );
 
 		BOOL BBoxFlat( void );
@@ -299,7 +302,9 @@ public:
 	virtual Activity GetDeathActivity ( void );
 	Activity GetSmallFlinchActivity( void );
 	virtual void Killed( entvars_t *pevAttacker, int iGib );
+	virtual void OnDying() {}
 	virtual void GibMonster( void );
+	virtual void GibHeadMonster( Vector headPosition, BOOL Head );
 	BOOL		 ShouldGibMonster( int iGib );
 	void		 CallGibMonster( void );
 	virtual int		HasCustomGibs( void ) { return FALSE; } //LRC
@@ -340,14 +345,18 @@ public:
 
 	void StartPatrol( CBaseEntity *path );
 
-	CBaseEntity* DropItem ( char *pszItemName, const Vector &vecPos, const Vector &vecAng );// drop an item.
 
+	CBaseEntity* DropItem ( char *pszItemName, const Vector &vecPos, const Vector &vecAng );// drop an item.
 	//LRC
 	float	CalcRatio( CBaseEntity *pLocus )
 	{
 		/*ALERT(at_console, "monster CR: %f/%f = %f\n", pev->health, pev->max_health, pev->health / pev->max_health);*/
 		return pev->health / pev->max_health;
 	}
+
+	void ScoreForHeadGib(entvars_t* pevAttacker);
+
+	float m_flLastYawTime;
 };
 
 

@@ -121,11 +121,19 @@ SOURCE=..\dlls\crowbar.cpp
 # End Source File
 # Begin Source File
 
+SOURCE=..\dlls\desert_eagle.cpp
+# End Source File
+# Begin Source File
+
 SOURCE=..\dlls\egon.cpp
 # End Source File
 # Begin Source File
 
 SOURCE=.\ev_hldm.cpp
+# End Source File
+# Begin Source File
+
+SOURCE=..\dlls\exportdef.h
 # End Source File
 # Begin Source File
 
@@ -169,6 +177,10 @@ SOURCE=..\dlls\mp5.cpp
 # End Source File
 # Begin Source File
 
+SOURCE=..\dlls\pipewrench.cpp
+# End Source File
+# Begin Source File
+
 SOURCE=..\dlls\python.cpp
 # End Source File
 # Begin Source File
@@ -182,6 +194,14 @@ SOURCE=..\dlls\satchel.cpp
 # Begin Source File
 
 SOURCE=..\dlls\shotgun.cpp
+# End Source File
+# Begin Source File
+
+SOURCE=..\dlls\smg.cpp
+# End Source File
+# Begin Source File
+
+SOURCE=..\dlls\sniperrifle.cpp
 # End Source File
 # Begin Source File
 
@@ -278,6 +298,10 @@ SOURCE=.\hud.cpp
 # End Source File
 # Begin Source File
 
+SOURCE=.\hud_caption.cpp
+# End Source File
+# Begin Source File
+
 SOURCE=.\hud_msg.cpp
 # End Source File
 # Begin Source File
@@ -291,6 +315,10 @@ SOURCE=.\hud_servers.cpp
 # Begin Source File
 
 SOURCE=.\hud_spectator.cpp
+# End Source File
+# Begin Source File
+
+SOURCE=.\hud_sprite.cpp
 # End Source File
 # Begin Source File
 
@@ -520,6 +548,10 @@ SOURCE=.\hud_servers_priv.h
 # Begin Source File
 
 SOURCE=.\hud_spectator.h
+# End Source File
+# Begin Source File
+
+SOURCE=.\hud_sprite.h
 # End Source File
 # Begin Source File
 

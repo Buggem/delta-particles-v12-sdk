@@ -55,15 +55,20 @@ IMPLEMENT_SAVERESTORE( CHealthKit, CItem);
 void CHealthKit :: Spawn( void )
 {
 	Precache( );
-	SET_MODEL(ENT(pev), "models/w_medkit.mdl");
-
-	CItem::Spawn();
+	if (pev->model)
+		SET_MODEL(ENT(pev), STRING(pev->model)); //LRC
+	else
+		SET_MODEL(ENT(pev), "models/w_medkit.mdl");
+	CItem::Spawn( );
 }
 
 void CHealthKit::Precache( void )
 {
-	PRECACHE_MODEL("models/w_medkit.mdl");
-	PRECACHE_SOUND("items/smallmedkit1.wav");
+	if (pev->model) 
+		PRECACHE_MODEL((char*)STRING(pev->model)); //LRC 
+	else 
+		PRECACHE_MODEL("models/w_medkit.mdl");
+		PRECACHE_SOUND("items/smallmedkit1.wav");
 }
 
 BOOL CHealthKit::MyTouch( CBasePlayer *pPlayer )
@@ -202,7 +207,7 @@ void CWallHealth::Use( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE u
 	}
 
 	// if the player doesn't have the suit, or there is no juice left, make the deny noise
-	if ((m_iJuice <= 0) || (!(pActivator->pev->weapons & (1<<WEAPON_SUIT))))
+	if ((m_iJuice <= 0) || (!(pActivator->pev->weapons & (1<<WEAPON_SUIT)) || pActivator->pev->health >= 100))
 	{
 		if (m_flSoundTime <= gpGlobals->time)
 		{

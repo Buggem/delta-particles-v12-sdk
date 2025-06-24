@@ -60,6 +60,7 @@ void CBaseEntity::InitMoveWith( void ) { } //LRC
 void CBaseEntity::SetNextThink( float delay, BOOL correctSpeed ) { }//LRC
 void CBaseEntity::AbsoluteNextThink( float time, BOOL correctSpeed ) { }//LRC
 void CBaseEntity::ThinkCorrection( ) { }//LRC
+void CBaseMonster::GibHeadMonster( class Vector, int) { }
 
 // CBaseDelay Stubs
 void CBaseDelay :: KeyValue( struct KeyValueData_s * ) { }
@@ -207,6 +208,7 @@ int CBaseMonster :: FindHintNode ( void ) { return NO_NODE; }
 void CBaseMonster::ReportAIState( void ) { }
 void CBaseMonster :: KeyValue( KeyValueData *pkvd ) { }
 BOOL CBaseMonster :: FCheckAITrigger ( void ) { return FALSE; }
+BOOL CBaseMonster :: FCheckAITrigger ( short ) { return FALSE; }
 int CBaseMonster :: CanPlaySequence( int interruptLevel ) { return FALSE; } //LRC - prototype changed
 BOOL CBaseMonster :: FindLateralCover ( const Vector &vecThreat, const Vector &vecViewOffset ) { return FALSE; }
 Vector CBaseMonster :: ShootAtEnemy( const Vector &shootOrigin ) { return g_vecZero; }
@@ -277,7 +279,7 @@ void CBasePlayer::SelectPrevItem( int iItem ) { }
 CBaseEntity *FindEntityForward( CBaseEntity *pMe ) { return NULL; }
 BOOL CBasePlayer :: FlashlightIsOn( void ) { return FALSE; }
 void CBasePlayer :: FlashlightTurnOn( void ) { }
-void CBasePlayer :: FlashlightTurnOff( void ) { }
+void CBasePlayer :: FlashlightTurnOff( bool playOffSound ) { }
 void CBasePlayer :: ForceClientDllUpdate( void ) { }
 void CBasePlayer::ImpulseCommands( ) { }
 void CBasePlayer::CheatImpulseCommands( int iImpulse ) { }

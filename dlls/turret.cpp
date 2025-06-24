@@ -1038,6 +1038,11 @@ int CBaseTurret::TakeDamage(entvars_t *pevInflictor, entvars_t *pevAttacker, flo
 		pev->takedamage = DAMAGE_NO;
 		pev->dmgtime = gpGlobals->time;
 
+		if (FBitSet(pev->flags, FL_MONSTER))
+		{
+			Fragged(pevAttacker);
+		}
+
 		ClearBits (pev->flags, FL_MONSTER); // why are they set in the first place???
 
 		SetUse(NULL);
@@ -1214,9 +1219,9 @@ void CSentry::Shoot(Vector &vecSrc, Vector &vecDirToEnemy)
 	
 	switch(RANDOM_LONG(0,2))
 	{
-	case 0: EMIT_SOUND(ENT(pev), CHAN_WEAPON, "weapons/hks1.wav", 1, ATTN_NORM); break;
-	case 1: EMIT_SOUND(ENT(pev), CHAN_WEAPON, "weapons/hks2.wav", 1, ATTN_NORM); break;
-	case 2: EMIT_SOUND(ENT(pev), CHAN_WEAPON, "weapons/hks3.wav", 1, ATTN_NORM); break;
+	case 0: EMIT_SOUND(ENT(pev), CHAN_WEAPON, "weapons/smg_fire1.wav", 1, ATTN_NORM); break;
+	case 1: EMIT_SOUND(ENT(pev), CHAN_WEAPON, "weapons/smg_fire1.wav", 1, ATTN_NORM); break;
+	case 2: EMIT_SOUND(ENT(pev), CHAN_WEAPON, "weapons/smg_fire1.wav", 1, ATTN_NORM); break;
 	}
 	pev->effects = pev->effects | EF_MUZZLEFLASH;
 }
@@ -1239,6 +1244,11 @@ int CSentry::TakeDamage(entvars_t *pevInflictor, entvars_t *pevAttacker, float f
 		pev->health = 0;
 		pev->takedamage = DAMAGE_NO;
 		pev->dmgtime = gpGlobals->time;
+
+		if (FBitSet(pev->flags, FL_MONSTER))
+		{
+			Fragged(pevAttacker);
+		}
 
 		ClearBits (pev->flags, FL_MONSTER); // why are they set in the first place???
 

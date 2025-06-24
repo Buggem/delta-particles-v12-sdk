@@ -29,7 +29,9 @@
 #include "animation.h"
 #include "weapons.h"
 #include "func_break.h"
+#include "scripted.h"
 #include "../engine/studio.h" //LRC
+#include "player.h"
 
 extern DLL_GLOBAL Vector		g_vecAttackDir;
 extern DLL_GLOBAL int			g_iSkillLevel;
@@ -344,7 +346,42 @@ void CBaseMonster :: GibMonster( void )
 	BOOL		gibbed = FALSE;
 	int			iszCustomGibs;
 
-	EMIT_SOUND(ENT(pev), CHAN_WEAPON, "common/bodysplat.wav", 1, ATTN_NORM);		
+	EMIT_SOUND(ENT(pev), CHAN_WEAPON, "common/bodysplat.wav", 1, ATTN_NORM);
+
+	if ( m_bloodColor != DONT_BLEED)
+	{
+		if ( m_bloodColor == BLOOD_COLOR_RED )
+			m_bloodColor = 71;
+
+		for (int i = 1; i <= 4; i++ ) 
+		{
+		MESSAGE_BEGIN( MSG_PVS, SVC_TEMPENTITY, pev->origin );
+			WRITE_BYTE( TE_BLOODSTREAM );
+			WRITE_COORD( pev->origin.x + RANDOM_FLOAT ( -10, 10 ));
+			WRITE_COORD( pev->origin.y + RANDOM_FLOAT ( -10, 10 ));
+			WRITE_COORD( pev->origin.z + 12 );
+			WRITE_COORD( RANDOM_FLOAT ( -10, 10 ));
+			WRITE_COORD( RANDOM_FLOAT ( -10, 10 ));
+			WRITE_COORD( RANDOM_FLOAT ( 16, 100 ));
+			WRITE_BYTE( m_bloodColor );
+			WRITE_BYTE( RANDOM_FLOAT ( 80, 150 ));
+		MESSAGE_END();
+		}
+
+		MESSAGE_BEGIN( MSG_PVS, SVC_TEMPENTITY, pev->origin );
+			WRITE_BYTE( TE_BLOODSPRITE );
+			WRITE_COORD( pev->origin.x);						// position
+			WRITE_COORD( pev->origin.y);
+			WRITE_COORD( pev->origin.z + 12);
+			WRITE_SHORT( g_sModelIndexBloodSpray );				// initial sprite model
+			WRITE_SHORT( g_sModelIndexBloodDrop );				// droplet sprite models
+			WRITE_BYTE( m_bloodColor );							// color index into host_basepal
+			WRITE_BYTE( 16 );									// size
+		MESSAGE_END();
+	
+		if ( m_bloodColor == 71 ) // Make it spawn gibs
+			m_bloodColor = BLOOD_COLOR_RED; 
+	}
 
 	if ( iszCustomGibs = HasCustomGibs() ) //LRC - monster_generic can have a custom gibset
 	{
@@ -360,7 +397,7 @@ void CBaseMonster :: GibMonster( void )
 	{
 		if ( CVAR_GET_FLOAT("violence_hgibs") != 0 )// Only the player will ever fail this test
 		{
-			CGib::SpawnHeadGib( pev );
+//			CGib::SpawnHeadGib( pev ); // This happens in npc code
 			CGib::SpawnRandomGibs( pev, 4, 1 );	// throw some human gibs.
 		}
 		gibbed = TRUE;
@@ -387,6 +424,54 @@ void CBaseMonster :: GibMonster( void )
 			FadeMonster();
 		}
 	}
+}
+
+void CBaseMonster :: GibHeadMonster( Vector headPosition, BOOL Head )		// Special blood FX for partial 'destruction' of monsters
+{
+		EMIT_SOUND(ENT(pev), CHAN_BODY, "common/bodysplat.wav", 1, ATTN_NORM);
+		
+		if ( Head )
+			CGib :: SpawnHeadGib( pev, "models/hgibs.mdl" );
+		else 
+		{
+			if (m_bloodColor != BLOOD_COLOR_YELLOW )
+				CGib::SpawnRandomGibs( pev, 2, 1 );
+			else
+				CGib::SpawnRandomGibs( pev, 2, 0 );
+		}
+
+		if ( m_bloodColor == BLOOD_COLOR_RED )
+			m_bloodColor = 71;
+
+		MESSAGE_BEGIN( MSG_PVS, SVC_TEMPENTITY, pev->origin );
+			WRITE_BYTE( TE_BLOODSPRITE );
+			WRITE_COORD( headPosition.x );								// pos
+			WRITE_COORD( headPosition.y );
+			WRITE_COORD( headPosition.z );
+			WRITE_SHORT( g_sModelIndexBloodSpray );				// initial sprite model
+			WRITE_SHORT( g_sModelIndexBloodDrop );				// droplet sprite models
+			WRITE_BYTE( m_bloodColor );							// color index into host_basepal
+			WRITE_BYTE( 16 );									// size
+		MESSAGE_END();
+		
+
+		for (int i = 1; i <= 3; i++ ) 
+		{
+		MESSAGE_BEGIN( MSG_PVS, SVC_TEMPENTITY, headPosition );
+			WRITE_BYTE( TE_BLOODSTREAM );
+			WRITE_COORD( headPosition.x + RANDOM_FLOAT ( -10, 10 ));
+			WRITE_COORD( headPosition.y + RANDOM_FLOAT ( -10, 10 ));
+			WRITE_COORD( headPosition.z );
+			WRITE_COORD( RANDOM_FLOAT ( -10, 10 ));
+			WRITE_COORD( RANDOM_FLOAT ( -10, 10 ));
+			WRITE_COORD( RANDOM_FLOAT ( 16, 100 ));
+			WRITE_BYTE( m_bloodColor );
+			WRITE_BYTE( RANDOM_FLOAT ( 80, 150 ));
+		MESSAGE_END();
+		}
+		
+		if ( m_bloodColor == 71 ) // Make it spawn gibs
+			m_bloodColor = BLOOD_COLOR_RED; 
 }
 
 //=========================================================
@@ -650,6 +735,8 @@ void CBaseMonster :: Killed( entvars_t *pevAttacker, int iGib )
 
 	Remember( bits_MEMORY_KILLED );
 
+	Fragged(pevAttacker);
+
 	// clear the deceased's sound channels.(may have been firing or reloading when killed)
 	EMIT_SOUND(ENT(pev), CHAN_WEAPON, "common/null.wav", 1, ATTN_NORM);
 	m_IdealMonsterState = MONSTERSTATE_DEAD;
@@ -683,6 +770,33 @@ void CBaseMonster :: Killed( entvars_t *pevAttacker, int iGib )
 	//pev->enemy = ENT( pevAttacker );//why? (sjb)
 	
 	m_IdealMonsterState = MONSTERSTATE_DEAD;
+}
+
+void CBaseEntity::Fragged(entvars_t *pevAttacker)
+{
+	const int classify = Classify();
+	if (classify == CLASS_PLAYER_ALLY || classify == CLASS_HUMAN_PASSIVE)
+		return;
+	CBasePlayer* pPlayer = CBasePlayer::PlayerInstance(pevAttacker);
+	if (pPlayer != NULL && pPlayer->m_pActiveItem)
+	{
+		if (pPlayer->m_pActiveItem->m_iId == WEAPON_GAUSS)
+		{
+			pPlayer->m_killedByRailgunCount++;
+			if (pPlayer->m_killedByRailgunCount == 2)
+			{
+				pPlayer->SetAchievement("ACH_LINE_OF_FIRE");
+			}
+		}
+		else if (pPlayer->m_pActiveItem->m_iId == WEAPON_PYTHON)
+		{
+			pPlayer->m_highNoonKills++;
+			if (pPlayer->m_highNoonKills == 6)
+			{
+				pPlayer->SetAchievement("ACH_HIGH_NOON");
+			}
+		}
+	}
 }
 
 //
@@ -780,7 +894,16 @@ void CGib :: BounceGibTouch ( CBaseEntity *pOther )
 			UTIL_TraceLine ( vecSpot, vecSpot + Vector ( 0, 0, -24 ),  ignore_monsters, ENT(pev), & tr);
 
 			UTIL_BloodDecalTrace( &tr, m_bloodColor );
-
+	if ( m_bloodColor != DONT_BLEED)
+	 {
+	 switch (RANDOM_LONG(0,7))
+	 {
+	 case 0: EMIT_SOUND_DYN( ENT(pev), CHAN_BODY, "flesh/flesh1.wav", 0.2, ATTN_NORM, 0, 100); break;
+	 case 1: EMIT_SOUND_DYN( ENT(pev), CHAN_BODY, "flesh/flesh2.wav", 0.2, ATTN_NORM, 0, 100); break;
+	case 2: EMIT_SOUND_DYN( ENT(pev), CHAN_BODY, "flesh/flesh3.wav", 0.2, ATTN_NORM, 0, 100); break;
+	case 3: EMIT_SOUND_DYN( ENT(pev), CHAN_BODY, "flesh/flesh4.wav", 0.2, ATTN_NORM, 0, 100); break;
+	 }
+	}
 			m_cBloodDecals--; 
 		}
 
@@ -941,7 +1064,10 @@ int CBaseMonster :: TakeDamage( entvars_t *pevInflictor, entvars_t *pevAttacker,
 	// if this is a player, move him around!
 	if ( ( !FNullEnt( pevInflictor ) ) && (pev->movetype == MOVETYPE_WALK) && (!pevAttacker || pevAttacker->solid != SOLID_TRIGGER) )
 	{
-		pev->velocity = pev->velocity + vecDir * -DamageForce( flDamage );
+		//pev->velocity = pev->velocity + vecDir * -DamageForce( flDamage );
+		Vector velocityAdd = vecDir * -DamageForce( flDamage );
+		velocityAdd.z = 0;
+		pev->velocity = pev->velocity + velocityAdd;
 	}
 
 	// do the damage
@@ -951,7 +1077,14 @@ int CBaseMonster :: TakeDamage( entvars_t *pevInflictor, entvars_t *pevAttacker,
 	// HACKHACK Don't kill monsters in a script.  Let them break their scripts first
 	if ( m_MonsterState == MONSTERSTATE_SCRIPT )
 	{
-		SetConditions( bits_COND_LIGHT_DAMAGE );
+		if ( m_pCine && m_pCine->m_interruptionPolicy == SCRIPT_INTERRUPTION_POLICY_ONLY_DEATH )
+		{
+			if (pev->health <= 0.0f)
+				SetConditions( bits_COND_HEAVY_DAMAGE );
+		}
+		else if (flDamage > 0)
+			SetConditions( bits_COND_LIGHT_DAMAGE );
+
 		return 0;
 	}
 
@@ -1116,6 +1249,9 @@ void RadiusDamage( Vector vecSrc, entvars_t *pevInflictor, entvars_t *pevAttacke
 		falloff = flDamage / flRadius;
 	else
 		falloff = 1.0;
+
+	if ( (flRadius > 250) && (flRadius < 310) ) // ���� �� ���������� � ���� ��������. �����, ���� ������ �� ����� �� ����� �� ����� �� 150 �� (��������, �������, ���...) .
+		flRadius = 250;
 
 	int bInWater = (UTIL_PointContents ( vecSrc ) == CONTENTS_WATER);
 
@@ -1426,6 +1562,38 @@ void CBaseMonster :: TraceAttack( entvars_t *pevAttacker, float flDamage, Vector
 			break;
 		}
 
+		if (ptr->iHitgroup == 1 && pev->deadflag != DEAD_DEAD && BloodColor() != DONT_BLEED && flDamage >= 5)
+			{
+			if ( m_bloodColor == BLOOD_COLOR_RED )
+				m_bloodColor = 71;
+
+			MESSAGE_BEGIN( MSG_PVS, SVC_TEMPENTITY, ptr->vecEndPos );
+				WRITE_BYTE( TE_BLOODSPRITE );
+				WRITE_COORD( ptr->vecEndPos.x);						// position
+				WRITE_COORD( ptr->vecEndPos.y);
+				WRITE_COORD( ptr->vecEndPos.z);
+				WRITE_SHORT( g_sModelIndexBloodSpray );				// initial sprite model
+				WRITE_SHORT( g_sModelIndexBloodDrop );				// droplet sprite models
+				WRITE_BYTE( m_bloodColor );							// color index into host_basepal
+				WRITE_BYTE( 8 );									// size
+			MESSAGE_END();
+
+			MESSAGE_BEGIN( MSG_PVS, SVC_TEMPENTITY, ptr->vecEndPos );
+					WRITE_BYTE( TE_BLOODSTREAM );
+					WRITE_COORD( ptr->vecEndPos.x );
+					WRITE_COORD( ptr->vecEndPos.y );
+					WRITE_COORD( ptr->vecEndPos.z );
+					WRITE_COORD( RANDOM_FLOAT ( -10, 10 ));
+					WRITE_COORD( RANDOM_FLOAT ( -10, 10 ));
+					WRITE_COORD( RANDOM_FLOAT ( 16, 100 ));
+					WRITE_BYTE( m_bloodColor );
+					WRITE_BYTE( RANDOM_FLOAT ( 65, 80 ));
+			MESSAGE_END();
+			
+			if ( m_bloodColor == 71 )
+				m_bloodColor = BLOOD_COLOR_RED;
+			}
+
 		SpawnBlood(ptr->vecEndPos, BloodColor(), flDamage);// a little surface blood.
 		TraceBleed( flDamage, vecDir, ptr, bitsDamageType );
 		AddMultiDamage( pevAttacker, this, flDamage, bitsDamageType );
@@ -1530,6 +1698,14 @@ void CBaseEntity::FireBullets(ULONG cShots, Vector vecSrc, Vector vecDirShooting
 
 				break;
 
+			case BULLET_OTIS_DEAGLE:
+				pEntity->TraceAttack(pevAttacker, gSkillData.monDmgDeagle, vecDir, &tr, DMG_BULLET);
+				
+				TEXTURETYPE_PlaySound(&tr, vecSrc, vecEnd, iBulletType);
+				DecalGunshot( &tr, iBulletType );
+
+				break;
+
 			case BULLET_MONSTER_MP5:
 				pEntity->TraceAttack(pevAttacker, gSkillData.monDmgMP5, vecDir, &tr, DMG_BULLET);
 				
@@ -1549,6 +1725,24 @@ void CBaseEntity::FireBullets(ULONG cShots, Vector vecSrc, Vector vecDirShooting
 			
 			case BULLET_PLAYER_357:
 				pEntity->TraceAttack(pevAttacker, gSkillData.plrDmg357, vecDir, &tr, DMG_BULLET);
+				if ( !tracer )
+				{
+					TEXTURETYPE_PlaySound(&tr, vecSrc, vecEnd, iBulletType);
+					DecalGunshot( &tr, iBulletType );
+				}
+				break;
+						
+			case BULLET_PLAYER_45ACP:
+				pEntity->TraceAttack(pevAttacker, gSkillData.plrDmg45ACP, vecDir, &tr, DMG_BULLET);
+				if ( !tracer )
+				{
+					TEXTURETYPE_PlaySound(&tr, vecSrc, vecEnd, iBulletType);
+					DecalGunshot( &tr, iBulletType );
+				}
+				break;
+
+			case BULLET_PLAYER_44:
+				pEntity->TraceAttack(pevAttacker, gSkillData.plrDmg44, vecDir, &tr, DMG_BULLET);
 				if ( !tracer )
 				{
 					TEXTURETYPE_PlaySound(&tr, vecSrc, vecEnd, iBulletType);
@@ -1633,8 +1827,16 @@ Vector CBaseEntity::FireBulletsPlayer ( ULONG cShots, Vector vecSrc, Vector vecD
 				pEntity->TraceAttack(pevAttacker, gSkillData.plrDmg9MM, vecDir, &tr, DMG_BULLET); 
 				break;
 
-			case BULLET_PLAYER_MP5:		
+			case BULLET_PLAYER_556MM:		
 				pEntity->TraceAttack(pevAttacker, gSkillData.plrDmgMP5, vecDir, &tr, DMG_BULLET); 
+				break;
+
+			case BULLET_PLAYER_45ACP:		
+				pEntity->TraceAttack(pevAttacker, gSkillData.plrDmg45ACP, vecDir, &tr, DMG_BULLET); 
+				break;
+
+			case BULLET_PLAYER_14MM:		
+				pEntity->TraceAttack(pevAttacker, gSkillData.plrDmg14MM, vecDir, &tr, DMG_BULLET); 
 				break;
 
 			case BULLET_PLAYER_BUCKSHOT:	
@@ -1646,6 +1848,10 @@ Vector CBaseEntity::FireBulletsPlayer ( ULONG cShots, Vector vecSrc, Vector vecD
 				pEntity->TraceAttack(pevAttacker, gSkillData.plrDmg357, vecDir, &tr, DMG_BULLET); 
 				break;
 				
+			case BULLET_PLAYER_44:		
+				pEntity->TraceAttack(pevAttacker, gSkillData.plrDmg44, vecDir, &tr, DMG_BULLET); 
+				break;
+
 			case BULLET_NONE: // FIX 
 				pEntity->TraceAttack(pevAttacker, 50, vecDir, &tr, DMG_CLUB);
 				TEXTURETYPE_PlaySound(&tr, vecSrc, vecEnd, iBulletType);
@@ -1783,5 +1989,62 @@ void CBaseMonster :: MakeDamageBloodDecal ( int cCount, float flNoise, TraceResu
 		{
 			UTIL_BloodDecalTrace( &Bloodtr, BloodColor() );
 		}
+	}
+}
+
+#define TREE_GIB_COUNT			5
+
+void CGib :: SpawnTreeGibs( entvars_t *pevVictim, int cGibs )
+{
+	int cSplat, iBody = 0;
+
+	for ( cSplat = 0 ; cSplat < cGibs ; cSplat++ )
+	{
+		CGib *pGib = GetClassPtr( (CGib *)NULL );
+
+		// aliens
+		pGib->Spawn( "models/tree_gibs.mdl" );
+		if ( cSplat > TREE_GIB_COUNT-1 )
+			iBody = RANDOM_LONG(0,TREE_GIB_COUNT-1);
+		else
+			iBody = cSplat; //set body in order, to prevent spawning multiple skulls, ribcages from one guy
+		pGib->pev->body = iBody;
+
+		if ( pevVictim )
+		{
+			// spawn the gib somewhere in the monster's bounding volume
+			pGib->pev->origin.x = pevVictim->origin.x + RANDOM_FLOAT(-12, 12);
+			pGib->pev->origin.y = pevVictim->origin.y + RANDOM_FLOAT(-12, 12);
+			pGib->pev->origin.z = pevVictim->origin.z + (54 + cSplat * 25);
+
+			// make the gib fly away from the attack vector
+			pGib->pev->velocity = g_vecAttackDir * -1;
+
+			// mix in some noise
+			pGib->pev->velocity.x += RANDOM_FLOAT ( -0.25, 0.25 );
+			pGib->pev->velocity.y += RANDOM_FLOAT ( -0.25, 0.25 );
+			pGib->pev->velocity.z += RANDOM_FLOAT ( -0.25, 0.25 );
+
+			pGib->pev->velocity = pGib->pev->velocity * RANDOM_FLOAT ( 100, 180 );
+
+			pGib->pev->avelocity.x = RANDOM_FLOAT ( 100, 150 );
+			pGib->pev->avelocity.y = RANDOM_FLOAT ( 100, 200 );
+			pGib->pev->avelocity.z = RANDOM_FLOAT ( 100, 200 );
+
+			// copy owner's blood color
+			pGib->m_bloodColor = (CBaseEntity::Instance(pevVictim))->BloodColor();	
+			if ( pevVictim->health > -150)
+			{
+				pGib->pev->velocity = pGib->pev->velocity * 2.5;
+			}
+			else
+			{
+				pGib->pev->velocity = pGib->pev->velocity * 3.5;
+			}
+
+			pGib->pev->solid = SOLID_BBOX;
+			UTIL_SetSize ( pGib->pev, Vector( 0 , 0 , 0 ), Vector ( 0, 0, 0 ) );
+		}
+		pGib->LimitVelocity();
 	}
 }

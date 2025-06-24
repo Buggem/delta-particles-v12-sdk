@@ -39,7 +39,9 @@
 #define NOSERVICE
 #define NOMCX
 #define NOIME
+#define HSPRITE HSPRITE_win32
 #include "windows.h"
+#undef HSPRITE
 #else // _WIN32
 #define FALSE 0
 #define TRUE (!FALSE)
@@ -54,7 +56,9 @@ typedef int BOOL;
 #endif
 #ifndef max
 #define max(a,b)  (((a) > (b)) ? (a) : (b))
+#ifndef _vsnprintf
 #define _vsnprintf(a,b,c,d) vsnprintf(a,b,c,d)
+#endif
 #endif
 #endif //_WIN32
 
@@ -62,6 +66,16 @@ typedef int BOOL;
 #include "stdio.h"
 #include "stdlib.h"
 #include "math.h"
+
+#ifndef _WIN32
+// Need to declare again on Linux?
+#ifndef min
+#define min(a,b)  (((a) < (b)) ? (a) : (b))
+#endif
+#ifndef max
+#define max(a,b)  (((a) > (b)) ? (a) : (b))
+#endif
+#endif
 
 // Header file containing definition of globalvars_t and entvars_t
 typedef int	func_t;					//

@@ -26,10 +26,10 @@
 #include	"scripted.h"
 #include	"animation.h"
 #include	"soundent.h"
+#include	"weapons.h"
 
-
-#define		NUM_SCIENTIST_HEADS		4 // four heads available for scientist model
-enum { HEAD_GLASSES = 0, HEAD_EINSTEIN = 1, HEAD_LUTHER = 2, HEAD_SLICK = 3 };
+#define		NUM_SCIENTIST_HEADS		5 // four heads available for scientist model
+enum { HEAD_GLASSES = 0, HEAD_EINSTEIN = 1, HEAD_LUTHER = 2, HEAD_SLICK = 3, BLANK = 4 };
 
 enum
 {
@@ -76,12 +76,16 @@ public:
 	void StartTask( Task_t *pTask );
 	int	ObjectCaps( void ) { return CTalkMonster :: ObjectCaps() | FCAP_IMPULSE_USE; }
 	int TakeDamage( entvars_t* pevInflictor, entvars_t* pevAttacker, float flDamage, int bitsDamageType);
+	void TraceAttack( entvars_t *pevAttacker, float flDamage, Vector vecDir, TraceResult *ptr, int bitsDamageType);
 	virtual int FriendNumber( int arrayNumber );
 	void SetActivity ( Activity newActivity );
 	Activity GetStoppedActivity( void );
 	int ISoundMask( void );
 	void DeclineFollowing( void );
-
+	void GibMonster ( void );
+	int BuckshotCount;
+	BOOL HeadGibbed;
+		
 	float	CoverRadius( void ) { return 1200; }		// Need more room for cover because scientists want to get far away!
 	BOOL	DisregardEnemy( CBaseEntity *pEnemy ) { return !pEnemy->IsAlive() || (gpGlobals->time - m_fearTime) > 15; }
 
@@ -434,7 +438,7 @@ void CScientist::DeclineFollowing( void )
 
 void CScientist :: Scream( void )
 {
-	if ( FOkToSpeak() )
+	if ( FOkToSpeak(SPEAK_DISREGARD_ENEMY) )
 	{
 		Talk( 10 );
 		m_hTalkTarget = m_hEnemy;
@@ -476,11 +480,11 @@ void CScientist :: StartTask( Task_t *pTask )
 		break;
 
 	case TASK_SAY_FEAR:
-		if ( FOkToSpeak() )
+		if ( FOkToSpeak(SPEAK_DISREGARD_ENEMY) )
 		{
 			Talk( 2 );
 			m_hTalkTarget = m_hEnemy;
-			if ( m_hEnemy->IsPlayer() )
+			if ( m_hEnemy != 0 && m_hEnemy->IsPlayer() )
 				PlaySentence( "SC_PLFEAR", 5, VOL_NORM, ATTN_NORM );
 			else
 				PlaySentence( "SC_FEAR", 5, VOL_NORM, ATTN_NORM );
@@ -684,6 +688,9 @@ void CScientist :: Spawn( void )
 	{// -1 chooses a random head
 		pev->body = RANDOM_LONG(0, NUM_SCIENTIST_HEADS-1);// pick a head, any head
 	}
+	
+	if ( pev->body == 4 )
+		pev->body = 1;
 
 	// Luther is black, make his hands black
 	if ( pev->body == HEAD_LUTHER )
@@ -718,14 +725,7 @@ void CScientist :: Precache( void )
 // Init talk data
 void CScientist :: TalkInit()
 {
-	
 	CTalkMonster::TalkInit();
-
-	// scientist will try to talk to friends in this order:
-
-	m_szFriends[0] = "monster_scientist";
-	m_szFriends[1] = "monster_sitting_scientist";
-	m_szFriends[2] = "monster_barney";
 
 	// scientists speach group names (group names are in sentences.txt)
 
@@ -775,6 +775,31 @@ void CScientist :: TalkInit()
 	}
 }
 
+void CScientist :: TraceAttack( entvars_t *pevAttacker, float flDamage, Vector vecDir, TraceResult *ptr, int bitsDamageType)
+{
+	if	( ptr->iHitgroup == 1 )
+	{
+		if ( (bitsDamageType & DMG_BULLET) && flDamage == gSkillData.plrDmgBuckshot )
+			BuckshotCount++;
+
+		ptr->iHitgroup = HITGROUP_HEAD;
+	    flDamage = flDamage * gSkillData.monHead;
+
+		if ( (((bitsDamageType & DMG_BULLET) && ( pev->health - flDamage <= 0) && flDamage >= 30) ||  BuckshotCount >= 4) && !HeadGibbed )
+		{
+			pev->body = BLANK;
+	
+			GibHeadMonster( ptr->vecEndPos, TRUE );
+			HeadGibbed = TRUE;
+		}
+	}
+	
+		flDamage = flDamage;
+		SpawnBlood(ptr->vecEndPos, BloodColor(), flDamage);
+		TraceBleed( flDamage, vecDir, ptr, bitsDamageType );
+		AddMultiDamage( pevAttacker, this, flDamage, bitsDamageType );
+}
+
 int CScientist :: TakeDamage( entvars_t *pevInflictor, entvars_t *pevAttacker, float flDamage, int bitsDamageType)
 {
 
@@ -784,10 +809,20 @@ int CScientist :: TakeDamage( entvars_t *pevInflictor, entvars_t *pevAttacker, f
 		StopFollowing( TRUE );
 	}
 
-	// make sure friends talk about it if player hurts scientist...
+	BuckshotCount = 0;
 	return CTalkMonster::TakeDamage(pevInflictor, pevAttacker, flDamage, bitsDamageType);
 }
 
+//=========================================================
+// GibMonster - make gibs, not shit...
+//=========================================================
+void CScientist :: GibMonster ( void )
+{
+	if ( !HeadGibbed )								// ..do I still have a head?
+		GibHeadMonster( Vector ( pev->origin.x, pev->origin.y, pev->origin.z + 16 ), TRUE );	// If yes, open it up! =)
+
+	CTalkMonster :: GibMonster( );
+}
 
 //=========================================================
 // ISoundMask - returns a bit mask indicating which types
@@ -798,6 +833,9 @@ int CScientist :: ISoundMask ( void )
 {
 	return	bits_SOUND_WORLD	|
 			bits_SOUND_COMBAT	|
+			bits_SOUND_CARCASS |
+			bits_SOUND_MEAT |
+			bits_SOUND_GARBAGE |
 			bits_SOUND_DANGER	|
 			bits_SOUND_PLAYER;
 }
@@ -949,7 +987,7 @@ Schedule_t *CScientist :: GetSchedule ( void )
 			pSound = PBestSound();
 
 			ASSERT( pSound != NULL );
-			if ( pSound )
+		if ( pSound )
 			{
 				if ( pSound->m_iType & (bits_SOUND_DANGER | bits_SOUND_COMBAT) )
 				{
@@ -1083,9 +1121,8 @@ MONSTERSTATE CScientist :: GetIdealState ( void )
 	return CTalkMonster::GetIdealState();
 }
 
-
 BOOL CScientist::CanHeal( void )
-{ 
+{
 	if ( (m_healTime > gpGlobals->time) || (m_hTargetEnt == NULL) || (m_hTargetEnt->pev->health > (m_hTargetEnt->pev->max_health * 0.5)) )
 		return FALSE;
 
@@ -1114,7 +1151,6 @@ int CScientist::FriendNumber( int arrayNumber )
 	return arrayNumber;
 }
 
-
 //=========================================================
 // Dead Scientist PROP
 //=========================================================
@@ -1122,6 +1158,7 @@ class CDeadScientist : public CBaseMonster
 {
 public:
 	void Spawn( void );
+	void GibMonster ( void );
 	int	Classify ( void ) { return	CLASS_HUMAN_PASSIVE; }
 
 	void KeyValue( KeyValueData *pkvd );
@@ -1173,10 +1210,18 @@ void CDeadScientist :: Spawn( )
 		ALERT ( at_debug, "Dead scientist with bad pose\n" );
 	}
 
+	if ( pev->body == 4 )
+		pev->body = 1;
+
 	//	pev->skin += 2; // use bloody skin -- UNDONE: Turn this back on when we have a bloody skin again!
 	MonsterInitDead();
 }
 
+void CDeadScientist :: GibMonster ( void )
+{
+	GibHeadMonster( Vector ( pev->origin.x, pev->origin.y, pev->origin.z + 16 ), TRUE );				 
+	CBaseMonster :: GibMonster( );
+}
 
 //=========================================================
 // Sitting Scientist PROP
@@ -1261,6 +1306,10 @@ void CSittingScientist :: Spawn( )
 	{// -1 chooses a random head
 		pev->body = RANDOM_LONG(0, NUM_SCIENTIST_HEADS-1);// pick a head, any head
 	}
+
+	if ( pev->body == 4 )
+		pev->body = 1;
+
 	// Luther is black, make his hands black
 	if ( pev->body == HEAD_LUTHER )
 		pev->skin = 1;

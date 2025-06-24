@@ -20,19 +20,24 @@
 // CHud handles the message, calculation, and drawing the HUD
 //
 
+#pragma once
+#if !defined(HUD_H)
+#define HUD_H
+
 #define FOG_LIMIT 30000
-#define RGB_YELLOWISH 0x00FFA000 //255,160,0
+#define RGB_YELLOWISH 0x00FFFFFF //100, 0, 225 6400E1
 #define RGB_REDISH 0x00FF1010 //255,160,0
 #define RGB_GREENISH 0x0000A000 //0,160,0
 
 #include "wrect.h"
 #include "cl_dll.h"
 #include "ammo.h"
+#include "dlight.h"
 
 #define DHN_DRAWZERO 1
 #define DHN_2DIGITS  2
 #define DHN_3DIGITS  4
-#define MIN_ALPHA	 100	
+#define MIN_ALPHA	 150	
 
 #define		HUDELEM_ACTIVE	1
 
@@ -53,6 +58,9 @@ typedef struct {
 
 typedef struct cvar_s cvar_t;
 
+extern cvar_t* cl_flashlight_custom;
+extern cvar_t* cl_flashlight_radius;
+extern cvar_t* cl_flashlight_fade_distance;
 
 #define HUD_ACTIVE	1
 #define HUD_INTERMISSION 2
@@ -90,7 +98,7 @@ struct HUDLIST {
 //
 //-----------------------------------------------------
 //
-#include "..\game_shared\voice_status.h"
+#include "../game_shared/voice_status.h"
 #include "hud_spectator.h"
 
 
@@ -430,6 +438,28 @@ private:
 	int	  m_iWidth;		// width of the battery innards
 };
 
+class CHudNightvision : public CHudBase
+{
+public:
+	int Init( void );
+	int VidInit( void );
+	int Draw( float flTime );
+	void Reset( void );
+	int MsgFunc_Nightvision( const char *pszName, int iSize, void *pbuf );
+	void DrawNVG(float flTime);
+	dlight_t* MakeDynLight(float flTime, int r, int g, int b);
+	void UpdateDynLight(dlight_t* dynLight, float radius, const Vector &origin);
+	void RemoveDlight();
+	float NvgRadius();
+	bool IsOn();
+private:
+	int m_fOn;
+	dlight_t* m_pLight;
+	HSPRITE m_hSprite;
+	int m_iFrame, m_nFrameCount;
+	float m_frameUpdateTime;
+};
+
 //
 //-----------------------------------------------------
 //
@@ -501,6 +531,7 @@ public:
 	void MessageScanStart( void );
 	void MessageScanNextChar( void );
 	void Reset( void );
+	void SetColorParams( bool consoleFont );
 
 private:
 	client_textmessage_t		*m_pMessages[maxHUDMessages];
@@ -550,6 +581,80 @@ private:
 
 	icon_sprite_t m_IconList[MAX_ICONSPRITES];
 
+};
+
+struct CaptionProfile_t
+{
+	char firstLetter;
+	char secondLetter;
+	int r, g, b;
+};
+
+#define CAPTION_SIZE 1200
+
+struct Caption_t
+{
+	char name[32];
+	CaptionProfile_t* profile;
+	char message[CAPTION_SIZE];
+	float delay;
+	float duration;
+};
+
+#define SUB_MAX_LINES 5
+
+struct Subtitle_t
+{
+	const Caption_t* caption;
+	int lineOffsets[SUB_MAX_LINES];
+	int lineEndOffsets[SUB_MAX_LINES];
+	int r, g, b;
+	float timeLeft;
+	float timeBeforeStart;
+	int lineCount;
+	bool radio;
+};
+
+#define CAPTION_PROFILES_MAX 32
+#define CAPTIONS_MAX 256
+
+struct WordBoundary
+{
+	unsigned int wordStart;
+	unsigned int wordEnd;
+};
+
+class CHudCaption : public CHudBase
+{
+public:
+	int Init();
+	int VidInit();
+	int Draw(float flTime);
+	void Reset();
+
+	int MsgFunc_Caption( const char *pszName, int iSize, void *pbuf );
+	void AddSubtitle(const Subtitle_t& sub);
+	void CalculateLineOffsets(Subtitle_t& sub);
+	void RecalculateLineOffsets();
+
+	void UserCmd_DumpCaptions();
+
+	bool ParseCaptionsFile();
+	void SortCaptions();
+	const Caption_t* CaptionLookup(const char* name);
+
+protected:
+	CaptionProfile_t profiles[CAPTION_PROFILES_MAX];
+	Caption_t captions[CAPTIONS_MAX];
+	int profileCount;
+	int captionCount;
+
+	Subtitle_t subtitles[4];
+	int sub_count;
+	bool captionsInit;
+	HSPRITE m_hVoiceIcon;
+	int voiceIconWidth;
+	int voiceIconHeight;
 };
 
 //
@@ -617,6 +722,7 @@ public:
 	int		m_iRes;
 	cvar_t  *m_pCvarStealMouse;
 	cvar_t	*m_pCvarDraw;
+	cvar_t	*m_pCvarCrosshair;
 	CShinySurface *m_pShinySurface; //LRC
 	Vector	m_vecSkyPos; //LRC
 	int		m_iSkyMode;  //LRC
@@ -629,6 +735,7 @@ public:
 	int GetNumWidth(int iNumber, int iFlags);
 
 	int m_iHUDColor; //LRC
+	int m_iHUDColor2;
 
 private:
 	// the memory for these arrays are allocated in the first call to CHud::VidInit(), when the hud.txt and associated sprites are loaded.
@@ -668,6 +775,8 @@ public:
 	CHudTextMessage m_TextMessage;
 	CHudStatusIcons m_StatusIcons;
 	CHudParticle	m_Particle; // (LRC) -- 30/08/02 November235: Particles to Order
+	CHudCaption		m_Caption;
+	CHudNightvision m_Nightvision;
 
 	void Init( void );
 	void VidInit( void );
@@ -687,7 +796,7 @@ public:
 	void _cdecl MsgFunc_ViewMode( const char *pszName, int iSize, void *pbuf );
 	int _cdecl MsgFunc_SetFOV(const char *pszName,  int iSize, void *pbuf);
 	int  _cdecl MsgFunc_Concuss( const char *pszName, int iSize, void *pbuf );
-
+	
 	int _cdecl MsgFunc_HUDColor(const char *pszName,  int iSize, void *pbuf);		//LRC
 	void _cdecl MsgFunc_SetFog( const char *pszName, int iSize, void *pbuf );		//LRC
 	void _cdecl MsgFunc_KeyedDLight( const char *pszName, int iSize, void *pbuf );	//LRC
@@ -709,6 +818,10 @@ public:
 
 	float GetSensitivity();
 
+	int m_bFlashlight;
+
+	bool m_iHardwareMode;
+	bool hasHudScaleInEngine;
 };
 
 class TeamFortressViewport;
@@ -722,3 +835,4 @@ extern int g_iUser1;
 extern int g_iUser2;
 extern int g_iUser3;
 
+#endif

@@ -372,7 +372,7 @@ void V_CalcGunAngle ( struct ref_params_s *pparams )
 	viewent->angles[ROLL]  -= v_idlescale * sin(pparams->time*v_iroll_cycle.value) * v_iroll_level.value;
 	
 	// don't apply all of the v_ipitch to prevent normally unseen parts of viewmodel from coming into view.
-	viewent->angles[PITCH] -= v_idlescale * sin(pparams->time*v_ipitch_cycle.value) * (v_ipitch_level.value * 0.5);
+	viewent->angles[PITCH] -= v_idlescale * sin(pparams->time*v_ipitch_cycle.value) * (v_ipitch_level.value * 0.5 );
 	viewent->angles[YAW]   -= v_idlescale * sin(pparams->time*v_iyaw_cycle.value) * v_iyaw_level.value;
 
 	VectorCopy( viewent->angles, viewent->curstate.angles );
@@ -401,18 +401,21 @@ V_CalcViewRoll
 Roll is induced by movement and damage
 ==============
 */
+
+extern cvar_t *cl_rollspeed;
+extern cvar_t *cl_rollangle;
+extern cvar_t *cl_strafing;
+
 void V_CalcViewRoll ( struct ref_params_s *pparams )
 {
-	float		side;
 	cl_entity_t *viewentity;
 	
 	viewentity = gEngfuncs.GetEntityByIndex( pparams->viewentity );
 	if ( !viewentity )
 		return;
-
-	side = V_CalcRoll ( viewentity->angles, pparams->simvel, pparams->movevars->rollangle, pparams->movevars->rollspeed );
-
-	pparams->viewangles[ROLL] += side;
+	
+	if (cl_strafing->value == 1)
+	pparams->viewangles[ROLL] = V_CalcRoll (pparams->viewangles, pparams->simvel, cl_rollangle->value, cl_rollspeed->value ) * 6;
 
 	if ( pparams->health <= 0 && ( pparams->viewheight[2] != 0 ) )
 	{
@@ -465,9 +468,128 @@ void V_CalcIntermissionRefdef ( struct ref_params_s *pparams )
 	v_origin = pparams->vieworg;
 	v_angles = pparams->viewangles;
 }
+/*
+#define ORIGIN_BACKUP 64
+#define ORIGIN_MASK ( ORIGIN_BACKUP - 1 )
+
+typedef struct 
+{
+	float Origins[ ORIGIN_BACKUP ][3];
+	float OriginTime[ ORIGIN_BACKUP ];
+
+	float Angles[ ORIGIN_BACKUP ][3];
+	float AngleTime[ ORIGIN_BACKUP ];
+
+	int CurrentOrigin;
+	int CurrentAngle;
+} viewinterp_t;
+
+float m_flWeaponLag = 1.5f;
+
+void V_CalcViewModelLag( ref_params_t *pparams, vec3_t &origin, vec3_t &angles, vec3_t original_angles )
+{
+    static vec3_t m_vecLastFacing;
+    vec3_t vOriginalOrigin = origin;
+    vec3_t vOriginalAngles = angles;
+    
+    // Calculate our drift
+    vec3_t    forward, right, up;
+    AngleVectors( angles, forward, right, up );
+    
+    if ( pparams->frametime != 0.0f )// not in paused
+    {
+        Vector vDifference;
+        
+        vDifference = forward - m_vecLastFacing;
+        
+        float flSpeed = 5.0f;
+        
+        // If we start to lag too far behind, we'll increase the "catch up" speed.
+        // Solves the problem with fast cl_yawspeed, m_yaw or joysticks rotating quickly.
+        // The old code would slam lastfacing with origin causing the viewmodel to pop to a new position
+        float flDiff = vDifference.Length();
+        if (( flDiff > m_flWeaponLag ) && ( m_flWeaponLag > 0.0f ))
+        {
+            float flScale = flDiff / m_flWeaponLag;
+            flSpeed *= flScale;
+        }
+        
+        // FIXME:  Needs to be predictable?
+        m_vecLastFacing = m_vecLastFacing + vDifference * ( flSpeed * pparams->frametime );
+        // Make sure it doesn't grow out of control!!!
+        m_vecLastFacing = m_vecLastFacing.Normalize();
+        origin = origin + right + (vDifference * -1.0f) * 3.25f;
+    }
+}
+*/
+
 
 #define ORIGIN_BACKUP 64
 #define ORIGIN_MASK ( ORIGIN_BACKUP - 1 )
+
+float m_flWeaponLag = 0.1f;
+
+void V_CalcViewModelLag( ref_params_t *pparams, vec3_t &origin, vec3_t &angles, vec3_t original_angles )
+{
+    static vec3_t m_vecLastFacing;
+    vec3_t vOriginalOrigin = origin;
+    vec3_t vOriginalAngles = angles;
+    
+    // Calculate our drift
+    vec3_t    forward, right, up;
+    AngleVectors( angles, forward, right, up );
+    
+    if ( pparams->frametime != 0.0f )// not in paused
+    {
+        Vector vDifference;
+        
+        vDifference = forward - m_vecLastFacing;
+        
+        float flSpeed = 5.0f;
+        
+        // If we start to lag too far behind, we'll increase the "catch up" speed.
+        // Solves the problem with fast cl_yawspeed, m_yaw or joysticks rotating quickly.
+        // The old code would slam lastfacing with origin causing the viewmodel to pop to a new position
+        float flDiff = vDifference.Length();
+        if (( flDiff > m_flWeaponLag ) && ( m_flWeaponLag > 0.0f ))
+        {
+            float flScale = flDiff / m_flWeaponLag;
+            flSpeed *= flScale;
+        }
+        
+        // FIXME:  Needs to be predictable?
+        m_vecLastFacing = m_vecLastFacing + vDifference * ( flSpeed * pparams->frametime );
+        // Make sure it doesn't grow out of control!!!
+        m_vecLastFacing = m_vecLastFacing.Normalize();
+        origin = origin + (vDifference * -1.0f) * 5.0f;
+    }
+    
+    AngleVectors( original_angles, forward, right, up );
+    
+    float pitch = original_angles[PITCH];
+    
+    if ( pitch > 180.0f )
+    {
+        pitch -= 360.0f;
+    }
+    else if ( pitch < -180.0f )
+    {
+        pitch += 360.0f;
+    }
+    
+    if ( m_flWeaponLag <= 0.0f )
+    {
+        origin = vOriginalOrigin;
+        angles = vOriginalAngles;
+    }
+    else
+    {
+        // FIXME: These are the old settings that caused too many exposed polys on some models
+        origin = origin + forward * ( -pitch * 0.005f );
+        origin = origin + right * ( -pitch * 0.003f );
+        origin = origin + up * ( -pitch * 0.0025f );
+    }
+}
 
 typedef struct 
 {
@@ -664,6 +786,7 @@ void V_CalcNormalRefdef ( struct ref_params_s *pparams )
 	}
 	
 	// Give gun our viewangles
+	Vector    lastAngles = view->angles;// save oldangles
 	VectorCopy ( pparams->cl_viewangles, view->angles );
 	
 	// set up gun position
@@ -679,7 +802,7 @@ void V_CalcNormalRefdef ( struct ref_params_s *pparams )
 
 	for ( i = 0; i < 3; i++ )
 	{
-		view->origin[ i ] += bob * 0.4 * pparams->forward[ i ];
+		view->origin[ i ] += bob * 0.15 * pparams->up[ i ];
 	}
 	view->origin[2] += bob;
 
@@ -692,6 +815,7 @@ void V_CalcNormalRefdef ( struct ref_params_s *pparams )
 	// gun a very nice 'shifting' effect when the player looks up/down. If there is a problem
 	// with view model distortion, this may be a cause. (SJB). 
 	view->origin[2] -= 1;
+	V_CalcViewModelLag( pparams, view->origin, view->angles, lastAngles );
 
 	// fudge position around to keep amount of weapon visible
 	// roughly equal with different FOV
@@ -1639,23 +1763,22 @@ void V_CalcSpectatorRefdef ( struct ref_params_s * pparams )
 }
 
 
-
 void DLLEXPORT V_CalcRefdef( struct ref_params_s *pparams )
 {
-	// intermission / finale rendering
-	if ( pparams->intermission )
-	{	
-		V_CalcIntermissionRefdef ( pparams );	
-	}
-	else if ( pparams->spectator || g_iUser1 )	// g_iUser true if in spectator mode
-	{
-		V_CalcSpectatorRefdef ( pparams );	
-	}
-	else if ( !pparams->paused )
-	{
-		V_CalcNormalRefdef ( pparams );
-	}
 
+    // intermission / finale rendering
+    if ( pparams->intermission )
+    {    
+        V_CalcIntermissionRefdef ( pparams );    
+    }
+    else if ( pparams->spectator || g_iUser1 )    // g_iUser true if in spectator mode
+    {
+        V_CalcSpectatorRefdef ( pparams );    
+    }
+    else if ( !pparams->paused )
+    {
+        V_CalcNormalRefdef ( pparams );
+    }
 /*
 // Example of how to overlay the whole screen with red at 50 % alpha
 #define SF_TEST

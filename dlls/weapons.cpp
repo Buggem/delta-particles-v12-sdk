@@ -173,10 +173,14 @@ void DecalGunshot( TraceResult *pTrace, int iBulletType )
 		{
 		case BULLET_PLAYER_9MM:
 		case BULLET_MONSTER_9MM:
-		case BULLET_PLAYER_MP5:
+		case BULLET_PLAYER_556MM:
+		case BULLET_PLAYER_14MM:
 		case BULLET_MONSTER_MP5:
 		case BULLET_PLAYER_BUCKSHOT:
+		case BULLET_OTIS_DEAGLE:
 		case BULLET_PLAYER_357:
+		case BULLET_PLAYER_44:
+		case BULLET_PLAYER_45ACP:
 		default:
 			// smoke and decal
 			UTIL_GunshotDecalTrace( pTrace, DamageDecal( pEntity, DMG_BULLET ) );
@@ -318,31 +322,47 @@ void W_Precache(void)
 	UTIL_PrecacheOther( "item_security" );
 	UTIL_PrecacheOther( "item_longjump" );
 
-	// shotgun
+	// Shotgun
 	UTIL_PrecacheOtherWeapon( "weapon_shotgun" );
 	UTIL_PrecacheOther( "ammo_buckshot" );
 
-	// crowbar
+	// Crowbar
 	UTIL_PrecacheOtherWeapon( "weapon_crowbar" );
 
-	// glock
+	// Glock
 	UTIL_PrecacheOtherWeapon( "weapon_9mmhandgun" );
 	UTIL_PrecacheOther( "ammo_9mmclip" );
-	UTIL_PrecacheOther( "ammo_9mmbox" ); //LRC
 
-	// mp5
-	UTIL_PrecacheOtherWeapon( "weapon_9mmAR" );
-	UTIL_PrecacheOther( "ammo_9mmAR" );
+	// SMG
+	UTIL_PrecacheOtherWeapon( "weapon_smg" );
+	UTIL_PrecacheOtherWeapon( "weapon_smg_nosilencer" );
+	UTIL_PrecacheOther( "ammo_45ACPclip" );
+
+	// Pipewrench
+	UTIL_PrecacheOtherWeapon( "weapon_pipewrench" );
+
+	// .44 Desert Eagle
+	UTIL_PrecacheOtherWeapon( "weapon_44desert_eagle" );
+	UTIL_PrecacheOther( "ammo_44clip" );
+
+	// Barrett M82A1
+	UTIL_PrecacheOtherWeapon( "weapon_barrett_m82a1" );
+	UTIL_PrecacheOther( "ammo_14mmclip" );
+
+	// M4A1
+	UTIL_PrecacheOtherWeapon( "weapon_m4a1" );
+	UTIL_PrecacheOther( "ammo_556mmclip" );
 	UTIL_PrecacheOther( "ammo_ARgrenades" );
 
+
 #if !defined( OEM_BUILD ) && !defined( HLDEMO_BUILD )
-	// python
+	// Python
 	UTIL_PrecacheOtherWeapon( "weapon_357" );
 	UTIL_PrecacheOther( "ammo_357" );
 #endif
 	
 #if !defined( OEM_BUILD ) && !defined( HLDEMO_BUILD )
-	// gauss
+	// Gauss
 	UTIL_PrecacheOtherWeapon( "weapon_gauss" );
 	UTIL_PrecacheOther( "ammo_gaussclip" );
 #endif
@@ -821,6 +841,12 @@ int CBasePlayerWeapon::UpdateClientData( CBasePlayer *pPlayer )
 			state = WEAPON_IS_ONTARGET;
 		else
 			state = 1;
+		if (pPlayer->m_pActiveItem->m_iId == WEAPON_SMG)
+		{
+			CSMG* pSmg = (CSMG*)pPlayer->m_pActiveItem;
+			if (pSmg->m_iSilencer)
+				state |= WEAPON_USE_SMG_SILENCER_CROSSHAIR;
+		}
 	}
 
 	// Forcing send of all data!
@@ -877,8 +903,8 @@ void CBasePlayerWeapon::SendWeaponAnim( int iAnim, int skiplocal, int body )
 	m_pPlayer->pev->weaponanim = iAnim;
 
 #if defined( CLIENT_WEAPONS )
-	if ( skiplocal && ENGINE_CANSKIP( m_pPlayer->edict() ) )
-		return;
+	//if ( skiplocal && ENGINE_CANSKIP( m_pPlayer->edict() ) )
+		//return;
 #endif
 
 	MESSAGE_BEGIN( MSG_ONE, SVC_WEAPONANIM, NULL, m_pPlayer->pev );
@@ -917,7 +943,7 @@ BOOL CBasePlayerWeapon :: AddPrimaryAmmo( int iCount, char *szName, int iMaxClip
 		{
 			// play the "got ammo" sound only if we gave some ammo to a player that already had this gun.
 			// if the player is just getting this gun for the first time, DefaultTouch will play the "picked up gun" sound for us.
-			EMIT_SOUND(ENT(pev), CHAN_ITEM, "items/9mmclip1.wav", 1, ATTN_NORM);
+			EMIT_SOUND(ENT(pev), CHAN_ITEM, "items/gunpickup2.wav", 1, ATTN_NORM);
 		}
 	}
 
@@ -936,7 +962,7 @@ BOOL CBasePlayerWeapon :: AddSecondaryAmmo( int iCount, char *szName, int iMax )
 	if (iIdAmmo > 0)
 	{
 		m_iSecondaryAmmoType = iIdAmmo;
-		EMIT_SOUND(ENT(pev), CHAN_ITEM, "items/9mmclip1.wav", 1, ATTN_NORM);
+		EMIT_SOUND(ENT(pev), CHAN_ITEM, "items/gunpickup2.wav", 1, ATTN_NORM);
 	}
 	return iIdAmmo > 0 ? TRUE : FALSE;
 }
@@ -1195,22 +1221,25 @@ void CBasePlayerWeapon::RetireWeapon( void )
 //=========================================================
 // LRC - remove the specified ammo from this gun
 //=========================================================
-void CBasePlayerWeapon::DrainClip(CBasePlayer* pPlayer, BOOL keep, int i9mm, int i357, int iBuck, int iBolt, int iARGren, int iRock, int iUranium, int iSatchel, int iSnark, int iTrip, int iGren )
+void CBasePlayerWeapon::DrainClip(CBasePlayer* pPlayer, BOOL keep, int i9mm, int i357, int iBolt, int iARGren, int iRock, int iUranium )
 {
 	int iPAI = PrimaryAmmoIndex();
 	int iAmt;
 	if (iPAI == -1) return;
 	else if (iPAI == pPlayer->GetAmmoIndex("9mm"))			iAmt = i9mm;
 	else if (iPAI == pPlayer->GetAmmoIndex("357"))			iAmt = i357;
-	else if (iPAI == pPlayer->GetAmmoIndex("buckshot"))		iAmt = iBuck;
+//	else if (iPAI == pPlayer->GetAmmoIndex("buckshot"))		iAmt = iBuck;
 	else if (iPAI == pPlayer->GetAmmoIndex("bolts"))		iAmt = iBolt;
 	else if (iPAI == pPlayer->GetAmmoIndex("ARgrenades"))	iAmt = iARGren;
 	else if (iPAI == pPlayer->GetAmmoIndex("uranium"))		iAmt = iUranium;
 	else if (iPAI == pPlayer->GetAmmoIndex("rockets"))		iAmt = iRock;
-	else if (iPAI == pPlayer->GetAmmoIndex("Satchel Charge")) iAmt = iSatchel;
+/*	else if (iPAI == pPlayer->GetAmmoIndex("Satchel Charge")) iAmt = iSatchel;
 	else if (iPAI == pPlayer->GetAmmoIndex("Snarks"))		iAmt = iSnark;
 	else if (iPAI == pPlayer->GetAmmoIndex("Trip Mine"))	iAmt = iTrip;
 	else if (iPAI == pPlayer->GetAmmoIndex("Hand Grenade")) iAmt = iGren;
+	else if (iPAI == pPlayer->GetAmmoIndex("44"))			iAmt = i44;
+	else if (iPAI == pPlayer->GetAmmoIndex("14mm"))			iAmt = i14mm;
+	else if (iPAI == pPlayer->GetAmmoIndex("45ACP"))		iAmt = i45ACP;*/
 	else return;
 
 	if (iAmt > 0)
@@ -1250,7 +1279,15 @@ IMPLEMENT_SAVERESTORE( CWeaponBox, CBaseEntity );
 //=========================================================
 void CWeaponBox::Precache( void )
 {
-	PRECACHE_MODEL("models/w_weaponbox.mdl");
+		if (pev->model)
+			PRECACHE_MODEL((char*)STRING(pev->model)); //LRC
+		else
+			PRECACHE_MODEL ("models/w_weaponbox.mdl");
+	
+		if (pev->noise)
+			PRECACHE_SOUND( (char*)STRING(pev->noise) ); //LRC
+		else
+			PRECACHE_SOUND( "items/gunpickup1.wav" );
 }
 
 //=========================================================
@@ -1281,8 +1318,12 @@ void CWeaponBox::Spawn( void )
 	pev->solid = SOLID_TRIGGER;
 
 	UTIL_SetSize( pev, g_vecZero, g_vecZero );
-
-	SET_MODEL( ENT(pev), "models/w_weaponbox.mdl");
+	{ 
+	if (pev->model)
+		SET_MODEL(ENT(pev), STRING(pev->model)); //LRC
+	else
+		SET_MODEL(ENT(pev), "models/w_weaponbox.mdl");
+	}
 }
 
 //=========================================================
@@ -1378,7 +1419,10 @@ void CWeaponBox::Touch( CBaseEntity *pOther )
 		}
 	}
 
-	EMIT_SOUND( pOther->edict(), CHAN_ITEM, "items/gunpickup2.wav", 1, ATTN_NORM );
+	if (pev->noise)
+		EMIT_SOUND( pPlayer->edict(), CHAN_ITEM, STRING(pev->noise), 1, ATTN_NORM ); //LRC
+	else
+		EMIT_SOUND( pPlayer->edict(), CHAN_ITEM, "items/gunpickup2.wav", 1, ATTN_NORM );
 	SetTouch(NULL);
 	UTIL_Remove(this);
 }
@@ -1569,6 +1613,11 @@ void CBasePlayerWeapon::PrintState( void )
 	ALERT( at_debug, "m_iclip:  %i\n", m_iClip );
 }
 
+TYPEDESCRIPTION	CPython::m_SaveData[] = 
+{
+	DEFINE_FIELD( CPython, m_fSpotActive, FIELD_INTEGER ),
+};
+IMPLEMENT_SAVERESTORE( CPython, CBasePlayerWeapon );
 
 TYPEDESCRIPTION	CRpg::m_SaveData[] = 
 {
@@ -1623,3 +1672,17 @@ TYPEDESCRIPTION	CSatchel::m_SaveData[] =
 };
 IMPLEMENT_SAVERESTORE( CSatchel, CBasePlayerWeapon );
 
+TYPEDESCRIPTION	CSMG::m_SaveData[] = 
+{
+	DEFINE_FIELD( CSMG, m_iSilencer, FIELD_BOOLEAN ),
+	DEFINE_FIELD( CSMG,	m_flSilencerTime, FIELD_INTEGER ),
+};
+IMPLEMENT_SAVERESTORE( CSMG, CBasePlayerWeapon );
+
+TYPEDESCRIPTION	CPipeWrench::m_SaveData[] =
+{
+	DEFINE_FIELD( CPipeWrench, m_flBigSwingStart, FIELD_TIME ),
+	DEFINE_FIELD( CPipeWrench, m_iSwing, FIELD_INTEGER ),
+	DEFINE_FIELD( CPipeWrench, m_iSwingMode, FIELD_INTEGER ),
+};
+IMPLEMENT_SAVERESTORE( CPipeWrench, CBasePlayerWeapon );

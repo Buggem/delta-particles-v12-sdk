@@ -308,6 +308,8 @@ TYPEDESCRIPTION	gEntvarsDescription[] =
 	DEFINE_ENTITY_FIELD( air_finished, FIELD_TIME ),
 	DEFINE_ENTITY_FIELD( pain_finished, FIELD_TIME ),
 	DEFINE_ENTITY_FIELD( radsuit_finished, FIELD_TIME ),
+	DEFINE_ENTITY_FIELD( iuser4, FIELD_INTEGER ),
+
 };
 
 #define ENTVARS_COUNT		(sizeof(gEntvarsDescription)/sizeof(gEntvarsDescription[0]))
@@ -395,7 +397,7 @@ Vector UTIL_VecToAngles( const Vector &vec )
 	
 //LRC - pass in a normalised axis vector and a number of degrees, and this returns the corresponding
 // angles value for an entity.
-inline Vector UTIL_AxisRotationToAngles( const Vector &vecAxis, float flDegs )
+Vector UTIL_AxisRotationToAngles( const Vector &vecAxis, float flDegs )
 {
 	Vector vecTemp = UTIL_AxisRotationToVec( vecAxis, flDegs );
 	float rgflVecOut[3];
@@ -1046,12 +1048,6 @@ void UTIL_ScreenFadeAll( const Vector &color, float fadeTime, float fadeHold, in
 	for ( i = 1; i <= gpGlobals->maxClients; i++ )
 	{
 		CBaseEntity *pPlayer = UTIL_PlayerByIndex( i );
-
-		#ifdef XENWARRIOR
-		if (((CBasePlayer*)pPlayer)->FlashlightIsOn())
-			((CBasePlayer*)pPlayer)->FlashlightTurnOff();
-		#endif
-	
 		UTIL_ScreenFadeWrite( fade, pPlayer );
 	}
 }
@@ -1120,6 +1116,26 @@ void UTIL_HudMessageAll( const hudtextparms_t &textparms, const char *pMessage )
 		if ( pPlayer )
 			UTIL_HudMessage( pPlayer, textparms, pMessage );
 	}
+}
+
+extern int gmsgCaption;
+void UTIL_ShowCaption(const char *messageId, int holdTime, bool radio)
+{
+	if (!messageId || !*messageId)
+		return;
+	if (*messageId == '!')
+	{
+		messageId = messageId+1;
+	}
+
+	if (holdTime > 255)
+		holdTime = 255;
+
+	MESSAGE_BEGIN( MSG_ALL, gmsgCaption );
+		WRITE_BYTE(holdTime);
+		WRITE_BYTE(radio ? 1 : 0);
+		WRITE_STRING(messageId);
+	MESSAGE_END();
 }
 
 					 
@@ -1486,7 +1502,6 @@ void UTIL_BloodStream( const Vector &origin, const Vector &direction, int color,
 
 	if ( g_Language == LANGUAGE_GERMAN && color == BLOOD_COLOR_RED )
 		color = 0;
-
 	
 	MESSAGE_BEGIN( MSG_PVS, SVC_TEMPENTITY, origin );
 		WRITE_BYTE( TE_BLOODSTREAM );
@@ -2933,6 +2948,58 @@ void CRestore::BufferReadBytes( char *pOutput, int size )
 	m_pdata->size += size;
 }
 
+void UTIL_SetModel( edict_t *e, const char *model )
+{
+    if (!model || !*model) //model not specified ???
+    {
+        ALERT(at_console, "Error! Model not specified\n" );
+        PRECACHE_MODEL( "models/error.mdl");
+        SET_MODEL( e, "models/error.mdl" );
+        return;
+    }
+    
+    int length;
+    const char *pFile = (char*)LOAD_FILE_FOR_ME( (char*)model, &length );
+    
+    if (pFile && length)
+    {
+        
+        FREE_FILE( (char *)pFile );
+        PRECACHE_MODEL( (char*)model);
+        SET_MODEL( e, model );
+    }
+    else //invalid path ?
+    {
+        FREE_FILE( (char *)pFile );
+        ALERT(at_console, "Error! Model %s not found\n", model );
+        PRECACHE_MODEL( "models/error.mdl");
+        SET_MODEL( e, "models/error.mdl" );
+        return;
+    }
+}
+
+int UTIL_PrecacheModel( char* s )
+{
+    if (FStringNull(MAKE_STRING(s))) //model not specified ???
+        return NULL;
+    
+    int length;
+    int model;
+    char *pFile = (char*)LOAD_FILE_FOR_ME( (char*)s, &length );
+    
+    if (pFile && length)
+    {
+        FREE_FILE( pFile );
+        model = PRECACHE_MODEL( (char*)s);
+    }
+    else
+    {
+        FREE_FILE( (char *)pFile );
+        model = PRECACHE_MODEL( "models/error.mdl" );
+    }
+    return model;
+    
+}
 
 void CRestore::BufferSkipBytes( int bytes )
 {

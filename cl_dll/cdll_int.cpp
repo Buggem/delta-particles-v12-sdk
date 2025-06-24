@@ -21,7 +21,9 @@
 #include "hud.h"
 #include "cl_util.h"
 #include "netadr.h"
-#include "vgui_schememanager.h"
+#include "vgui_SchemeManager.h"
+
+
 
 extern "C"
 {
@@ -33,8 +35,9 @@ extern "C"
 #include "vgui_int.h"
 #include "interface.h"
 
-#define DLLEXPORT __declspec( dllexport )
+#include "hud_sprite.h"
 
+#include "steam_integration.h"
 
 cl_enginefunc_t gEngfuncs;
 CHud gHUD;
@@ -170,6 +173,8 @@ int DLLEXPORT HUD_VidInit( void )
 
 	VGui_Startup();
 
+	ScaledRenderer::Instance().HUD_VidInit();
+
 	return 1;
 }
 
@@ -185,9 +190,12 @@ the hud variables.
 
 void DLLEXPORT HUD_Init( void )
 {
+	InitSteam();
 	InitInput();
 	gHUD.Init();
 	Scheme_Init();
+
+	ScaledRenderer::Instance().HUD_Init();
 }
 
 
@@ -199,9 +207,13 @@ called every screen frame to
 redraw the HUD.
 ===========================
 */
+extern void DrawFlashlight();
 
 int DLLEXPORT HUD_Redraw( float time, int intermission )
 {
+	if (gHUD.m_bFlashlight)
+		DrawFlashlight();
+
 	gHUD.Redraw( time, intermission );
 
 	return 1;
@@ -251,9 +263,20 @@ Called by engine every frame that client .dll is loaded
 
 void DLLEXPORT HUD_Frame( double time )
 {
+	// We're too lazy to make new weapons work properly with predicting at the moment. Just forcibly disable it.
+	extern cvar_t* cl_lw;
+	if (cl_lw && cl_lw->value)
+	{
+		gEngfuncs.Cvar_SetValue("cl_lw", 0.0f);
+	}
+
 	ServersThink( time );
 
 	GetClientVoiceMgr()->Frame(time);
+
+	ScaledRenderer::Instance().HUD_Frame(time);
+
+	SteamRunCallbacks();
 }
 
 
@@ -283,4 +306,7 @@ void DLLEXPORT HUD_DirectorMessage( int iSize, void *pbuf )
 	 gHUD.m_Spectator.DirectorMessage( iSize, pbuf );
 }
 
-
+bool IsXashFWGS()
+{
+	return false;
+}

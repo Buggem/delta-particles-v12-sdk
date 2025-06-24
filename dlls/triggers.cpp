@@ -43,6 +43,8 @@
 #define SF_TRIGGER_HURT_CLIENTONLYFIRE	16// trigger hurt will only fire its target if it is hurting a client
 #define SF_TRIGGER_HURT_CLIENTONLYTOUCH 32// only clients may touch this trigger.
 
+#define SF_TRIGGER_HURT_NO_PUNCH 512
+
 extern DLL_GLOBAL BOOL		g_fGameOver;
 
 extern void SetMovedir(entvars_t* pev);
@@ -1373,6 +1375,7 @@ public:
 
 	int m_iszAmtFactor;
 };
+LINK_ENTITY_TO_CLASS( render_fader, CRenderFxFader )
 
 TYPEDESCRIPTION	CRenderFxFader::m_SaveData[] = 
 {
@@ -1392,6 +1395,7 @@ IMPLEMENT_SAVERESTORE(CRenderFxFader,CBaseEntity);
 
 void CRenderFxFader :: Spawn( void )
 {
+	pev->classname = MAKE_STRING("render_fader");
 	SetThink(&CRenderFxFader :: FadeThink );
 }
 
@@ -2362,7 +2366,12 @@ void CTriggerHurt :: HurtTouch ( CBaseEntity *pOther )
 	if ( fldmg < 0 )
 		pOther->TakeHealth( -fldmg, m_bitsDamageInflict );
 	else
-		pOther->TakeDamage( pev, pev, fldmg, m_bitsDamageInflict );
+	{
+		int dmgType = m_bitsDamageInflict;
+		if (FBitSet(pev->spawnflags, SF_TRIGGER_HURT_NO_PUNCH))
+			dmgType |= DMG_NO_PUNCH;
+		pOther->TakeDamage( pev, pev, fldmg, dmgType );
+	}
 
 	// Store pain time so we can get all of the other entities on this frame
 	pev->pain_finished = gpGlobals->time;
@@ -2629,8 +2638,10 @@ public:
 	void Spawn( void );
 
 	virtual void Use( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE useType, float value );
+     BOOL m_bPlaying;
 	void PlayTrack( void );
 	void Touch ( CBaseEntity *pOther );
+
 };
 
 LINK_ENTITY_TO_CLASS( trigger_cdaudio, CTriggerCDAudio );
@@ -2693,12 +2704,11 @@ void PlayCDTrack( int iTrack )
 // only plays for ONE client, so only use in single play!
 void CTriggerCDAudio :: PlayTrack( void )
 {
-	PlayCDTrack( (int)pev->health );
-	
-	SetTouch( NULL );
+     if (!m_bPlaying) // if we're not playing, start playing!
+          m_bPlaying = TRUE;
+
 	UTIL_Remove( this );
 }
-
 
 // This plays a CD track when fired or when the player enters it's radius
 class CTargetCDAudio : public CPointEntity
@@ -3808,27 +3818,33 @@ void CTriggerPush :: Touch( CBaseEntity *pOther )
 	else
 		vecPush = vecPush * 100;
 
-	if ( pevToucher->solid != SOLID_NOT && pevToucher->solid != SOLID_BSP )
-	{
-		// Instant trigger, just transfer velocity and remove
-		if (FBitSet(pev->spawnflags, SF_TRIG_PUSH_ONCE))
-		{
-			pevToucher->velocity = pevToucher->velocity + vecPush;
-			if ( pevToucher->velocity.z > 0 )
-				pevToucher->flags &= ~FL_ONGROUND;
-			UTIL_Remove( this );
-		}
-		else
-		{	// Push field, transfer to base velocity
-			if ( pevToucher->flags & FL_BASEVELOCITY )
-				vecPush = vecPush +  pevToucher->basevelocity;
+if ( pevToucher->solid != SOLID_NOT ) //&& pevToucher->solid != SOLID_BSP )
+{
+   if(pevToucher->movetype == MOVETYPE_PUSHSTEP) //pushable related code
+   {
+     pevToucher->velocity = pevToucher->velocity + (pev->speed * pev->movedir);
 
-			pevToucher->basevelocity = vecPush;
+     if ( pevToucher->velocity.z > 0 )
+       pevToucher->flags &= ~FL_ONGROUND;
 
-			pevToucher->flags |= FL_BASEVELOCITY;
-//			ALERT( at_console, "Vel %f, base %f\n", pevToucher->velocity.z, pevToucher->basevelocity.z );
-		}
-	}
+     pev->solid = SOLID_NOT; //push once. re-enable to affect again
+   }
+   else //other physobjects
+   {
+     // Push field, transfer to base velocity
+     Vector vecPush = (pev->speed * pev->movedir);
+
+     if ( pevToucher->flags & FL_BASEVELOCITY )
+       vecPush = vecPush + pevToucher->basevelocity;
+
+     pevToucher->basevelocity = vecPush;
+     pevToucher->flags |= FL_BASEVELOCITY;
+
+     //ALERT( at_console, "Vel %f, base %f\n", pevToucher->velocity.z, pevToucher->basevelocity.z );
+   }
+
+   if (FBitSet(pev->spawnflags, SF_TRIG_PUSH_ONCE)) UTIL_Remove( this );
+}
 }
 
 
@@ -4199,6 +4215,7 @@ void CTriggerSave::SaveTouch( CBaseEntity *pOther )
 	SetTouch( NULL );
 	UTIL_Remove( this );
 	SERVER_COMMAND( "autosave\n" );
+	UTIL_ShowMessage("AUTOSAVE", pOther);
 }
 
 #define SF_ENDSECTION_USEONLY		0x0001
@@ -5155,6 +5172,7 @@ void CTriggerCamera::Use( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYP
 	}
 		
 	m_hPlayer = pActivator;
+	CBasePlayer* pPlayer = static_cast<CBasePlayer*>(pActivator);
 
 	m_flReturnTime = gpGlobals->time + m_flWait;
 	pev->speed = m_initialSpeed;
@@ -5178,7 +5196,7 @@ void CTriggerCamera::Use( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYP
 
 	if (FBitSet (pev->spawnflags, SF_CAMERA_PLAYER_TAKECONTROL ) )
 	{
-		((CBasePlayer *)pActivator)->EnableControl(FALSE);
+		pPlayer->EnableControl(FALSE);
 	}
 
 	if ( m_sPath )
@@ -5220,11 +5238,13 @@ void CTriggerCamera::Use( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYP
 		if (pEntity)
 		{
 			SET_VIEW( pActivator->edict(), pEntity->edict() );
+			pPlayer->m_hViewEntity = pEntity;
 		}
 	}
 	else
 	{
 		SET_VIEW( pActivator->edict(), edict() );
+		pPlayer->m_hViewEntity = this;
 	}
 
 	SET_MODEL(ENT(pev), STRING(pActivator->pev->model) );
@@ -5245,11 +5265,17 @@ void CTriggerCamera::FollowTarget( )
 
 	if (m_hTarget == NULL || m_flReturnTime < gpGlobals->time)
 	{
-		if (m_hPlayer->IsAlive( ))
+		CBasePlayer* player = static_cast<CBasePlayer*>(static_cast<CBaseEntity*>(m_hPlayer));
+
+		if (player->IsAlive( ))
 		{
-			SET_VIEW( m_hPlayer->edict(), m_hPlayer->edict() );
-			((CBasePlayer *)((CBaseEntity *)m_hPlayer))->EnableControl(TRUE);
+			SET_VIEW( player->edict(), player->edict() );
+			player->EnableControl(TRUE);
 		}
+
+		player->m_hViewEntity = 0;
+		player->m_bResetViewEntity = false;
+
 		SUB_UseTargets( this, USE_TOGGLE, 0 );
 		pev->avelocity = Vector( 0, 0, 0 );
 		m_state = 0;

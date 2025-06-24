@@ -1,6 +1,6 @@
 /***
 *
-*	Copyright (c) 1999, 2000 Valve LLC. All rights reserved.
+*	Copyright (c) 1996-2002, Valve LLC. All rights reserved.
 *	
 *	This product contains software technology licensed from Id 
 *	Software, Inc. ("Id Technology").  Id Technology (c) 1996 Id Software, Inc. 
@@ -25,7 +25,6 @@
 #include	"weapons.h"
 #include	"soundent.h"
 #include	"hornet.h"
-#include	"scripted.h"
 
 //=========================================================
 // monster-specific schedule types
@@ -69,10 +68,6 @@ int iAgruntMuzzleFlash;
 
 #define		AGRUNT_MELEE_DIST	100
 
-//LRC - body definitions for the Agrunt model
-#define		AGRUNT_BODY_HASGUN 0
-#define		AGRUNT_BODY_NOGUN  1
-
 class CAGrunt : public CSquadMonster
 {
 public:
@@ -100,13 +95,14 @@ public:
 	void AttackSound ( void );
 	void PrescheduleThink ( void );
 	void TraceAttack( entvars_t *pevAttacker, float flDamage, Vector vecDir, TraceResult *ptr, int bitsDamageType);
+	int TakeDamage( entvars_t *pevInflictor, entvars_t *pevAttacker, float flDamage, int bitsDamageType );
 	int IRelationship( CBaseEntity *pTarget );
+	int	BuckshotCount;
 	void StopTalking ( void );
 	BOOL ShouldSpeak( void );
-	virtual void Killed( entvars_t *pevAttacker, int iGib );
-
-	
+	BOOL HeadGibbed;
 	CUSTOM_SCHEDULES;
+	Vector HeadPos;
 
 	virtual int		Save( CSave &save );
 	virtual int		Restore( CRestore &restore );
@@ -258,8 +254,9 @@ void CAGrunt :: TraceAttack( entvars_t *pevAttacker, float flDamage, Vector vecD
 		}
 
 		flDamage -= 20;
-		if (flDamage <= 0)
+		if (flDamage <= 60)
 			flDamage = 0.1;// don't hurt the monster much, but allow bits_COND_LIGHT_DAMAGE to be generated
+
 	}
 	else
 	{
@@ -267,7 +264,43 @@ void CAGrunt :: TraceAttack( entvars_t *pevAttacker, float flDamage, Vector vecD
 		TraceBleed( flDamage, vecDir, ptr, bitsDamageType );
 	}
 
-	AddMultiDamage( pevAttacker, this, flDamage, bitsDamageType );
+	if ( ptr->iHitgroup == 1 && !HeadGibbed )
+	{
+		if ( (bitsDamageType & DMG_BULLET) && flDamage == gSkillData.plrDmgBuckshot )
+			BuckshotCount++;
+
+		if ( flDamage >= gSkillData.plrDmg14MM )
+			flDamage = pev->health; // OneShot! Barrett..
+		else 
+			flDamage = flDamage / 1.25; 
+
+		if ( pev->health <= flDamage * gSkillData.monHead && flDamage >= 8 && !HeadGibbed)
+		{
+			SetBodygroup( 0, 1);
+			GibHeadMonster( ptr->vecEndPos, FALSE );
+			HeadGibbed = TRUE;
+			ScoreForHeadGib(pevAttacker);
+		}
+	}
+	
+	CBaseMonster::TraceAttack( pevAttacker, flDamage, vecDir, ptr, bitsDamageType );
+}
+
+int CAGrunt :: TakeDamage( entvars_t *pevInflictor, entvars_t *pevAttacker, float flDamage, int bitsDamageType )
+{
+	Forget( bits_MEMORY_INCOVER );
+
+	if ( !HeadGibbed && (pev->health <= flDamage && BuckshotCount >= 6) ) // separate for shotgun =/, TraceAttack doesn't work correctly
+	{
+		SetBodygroup( 0, 1);
+
+		GibHeadMonster( HeadPos, FALSE );
+		HeadGibbed = TRUE;
+		ScoreForHeadGib(pevAttacker);
+	}
+
+	BuckshotCount = 0;
+	return CBaseMonster :: TakeDamage ( pevInflictor, pevAttacker, flDamage, bitsDamageType );
 }
 
 //=========================================================
@@ -393,7 +426,7 @@ void CAGrunt :: PainSound ( void )
 //=========================================================
 int	CAGrunt :: Classify ( void )
 {
-	return m_iClass?m_iClass:CLASS_ALIEN_MILITARY;
+	return	CLASS_ALIEN_MILITARY;
 }
 
 //=========================================================
@@ -474,22 +507,22 @@ void CAGrunt :: HandleAnimEvent( MonsterEvent_t *pEvent )
 
 			CBaseEntity *pHornet = CBaseEntity::Create( "hornet", vecArmPos, UTIL_VecToAngles( vecDirToEnemy ), edict() );
 			UTIL_MakeVectors ( pHornet->pev->angles );
-			pHornet->pev->velocity = gpGlobals->v_forward * 300;
+			pHornet->pev->velocity = gpGlobals->v_forward * 1100;
+			
+			
+			
+			switch ( RANDOM_LONG ( 0 , 2 ) )
+			{
+				case 0:	EMIT_SOUND_DYN ( ENT(pev), CHAN_WEAPON, "agrunt/ag_fire1.wav", 1.0, ATTN_NORM, 0, 100 );	break;
+				case 1:	EMIT_SOUND_DYN ( ENT(pev), CHAN_WEAPON, "agrunt/ag_fire2.wav", 1.0, ATTN_NORM, 0, 100 );	break;
+				case 2:	EMIT_SOUND_DYN ( ENT(pev), CHAN_WEAPON, "agrunt/ag_fire3.wav", 1.0, ATTN_NORM, 0, 100 );	break;
+			}
 
 			CBaseMonster *pHornetMonster = pHornet->MyMonsterPointer();
 
-			//LRC - hornets have the same allegiance as their creators
-			pHornetMonster->m_iPlayerReact = m_iPlayerReact;
-			pHornetMonster->m_iClass = m_iClass;
-			if (m_afMemory & bits_MEMORY_PROVOKED) // if I'm mad at the player, so are my hornets
-				pHornetMonster->Remember(bits_MEMORY_PROVOKED);
-
 			if ( pHornetMonster )
 			{
-				if (m_pCine && m_pCine->PreciseAttack()) //LRC- are we doing a scripted action?
-					pHornetMonster->m_hEnemy = m_hTargetEnt;
-				else
-					pHornetMonster->m_hEnemy = m_hEnemy;
+				pHornetMonster->m_hEnemy = m_hEnemy;
 			}
 		}
 		break;
@@ -584,18 +617,14 @@ void CAGrunt :: Spawn()
 {
 	Precache( );
 
-	if (pev->model)
-		SET_MODEL(ENT(pev), STRING(pev->model)); //LRC
-	else
-		SET_MODEL(ENT(pev), "models/agrunt.mdl");
+	SET_MODEL(ENT(pev), "models/agrunt.mdl");
 	UTIL_SetSize(pev, Vector(-32, -32, 0), Vector(32, 32, 64));
 
 	pev->solid			= SOLID_SLIDEBOX;
 	pev->movetype		= MOVETYPE_STEP;
 	m_bloodColor		= BLOOD_COLOR_GREEN;
 	pev->effects		= 0;
-	if (pev->health == 0)
-		pev->health			= gSkillData.agruntHealth;
+	pev->health			= gSkillData.agruntHealth;
 	m_flFieldOfView		= 0.2;// indicates the width of this monster's forward view cone ( as a dotproduct result )
 	m_MonsterState		= MONSTERSTATE_NONE;
 	m_afCapability		= 0;
@@ -616,10 +645,7 @@ void CAGrunt :: Precache()
 {
 	int i;
 
-	if (pev->model)
-		PRECACHE_MODEL((char*)STRING(pev->model)); //LRC
-	else
-		PRECACHE_MODEL("models/agrunt.mdl");
+	PRECACHE_MODEL("models/agrunt.mdl");
 
 	for ( i = 0; i < ARRAYSIZE( pAttackHitSounds ); i++ )
 		PRECACHE_SOUND((char *)pAttackHitSounds[i]);
@@ -1199,20 +1225,3 @@ Schedule_t* CAGrunt :: GetScheduleOfType ( int Type )
 	return CSquadMonster :: GetScheduleOfType( Type );
 }
 
-
-void CAGrunt::Killed( entvars_t *pevAttacker, int iGib )
-{
-	if ( pev->spawnflags & SF_MONSTER_NO_WPN_DROP )
-	{// drop the hornetgun!
-		Vector vecGunPos;
-		Vector vecGunAngles;
-
-		pev->body = AGRUNT_BODY_NOGUN;
-
-		GetAttachment( 0, vecGunPos, vecGunAngles );
-		
-		DropItem( "weapon_hornetgun", vecGunPos, vecGunAngles );
-	}
-
-	CBaseMonster::Killed( pevAttacker, iGib );
-}

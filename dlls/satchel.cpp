@@ -74,7 +74,7 @@ void CSatchelCharge :: Spawn( void )
 
 	SET_MODEL(ENT(pev), "models/w_satchel.mdl");
 	//UTIL_SetSize(pev, Vector( -16, -16, -4), Vector(16, 16, 32));	// Old box -- size of headcrab monsters/players get blocked by this
-	UTIL_SetSize(pev, Vector( -4, -4, -4), Vector(4, 4, 4));	// Uses point-sized, and can be stepped over
+	UTIL_SetSize(pev, Vector( -4, -4, -4), Vector(4, 4, 4));
 	UTIL_SetOrigin( this, pev->origin );
 
 	SetTouch(&CSatchelCharge :: SatchelSlide );
@@ -155,6 +155,7 @@ void CSatchelCharge :: Precache( void )
 	PRECACHE_SOUND("weapons/g_bounce1.wav");
 	PRECACHE_SOUND("weapons/g_bounce2.wav");
 	PRECACHE_SOUND("weapons/g_bounce3.wav");
+	PRECACHE_SOUND("weapons/grenade_throw.wav");
 }
 
 void CSatchelCharge :: BounceSound( void )
@@ -246,7 +247,7 @@ int CSatchel::GetItemInfo(ItemInfo *p)
 	p->iMaxClip = WEAPON_NOCLIP;
 	p->iSlot = 4;
 	p->iPosition = 1;
-	p->iFlags = ITEM_FLAG_SELECTONEMPTY | ITEM_FLAG_LIMITINWORLD | ITEM_FLAG_EXHAUSTIBLE;
+	p->iFlags = ITEM_FLAG_SELECTONEMPTY |ITEM_FLAG_LIMITINWORLD | ITEM_FLAG_EXHAUSTIBLE;
 	p->iId = m_iId = WEAPON_SATCHEL;
 	p->iWeight = SATCHEL_WEIGHT;
 
@@ -291,7 +292,10 @@ BOOL CSatchel::CanDeploy( void )
 
 BOOL CSatchel::Deploy( )
 {
+	if (m_chargeReady == 2)
+		m_chargeReady = SATCHEL_IDLE1;
 
+	g_engfuncs.pfnSetClientMaxspeed(m_pPlayer->edict(), 230 );
 	m_pPlayer->m_flNextAttack = UTIL_WeaponTimeBase() + 1.0;
 	m_flTimeWeaponIdle = UTIL_WeaponTimeBase() + UTIL_SharedRandomFloat( m_pPlayer->random_seed, 10, 15 );
 
@@ -307,7 +311,8 @@ BOOL CSatchel::Deploy( )
 
 void CSatchel::Holster( int skiplocal /* = 0 */ )
 {
-	m_pPlayer->m_flNextAttack = UTIL_WeaponTimeBase() + 0.5;
+	g_engfuncs.pfnSetClientMaxspeed(m_pPlayer->edict(), 230 );
+	m_pPlayer->m_flNextAttack = UTIL_WeaponTimeBase() + 0.35;
 	
 	if ( m_chargeReady )
 	{
@@ -317,7 +322,6 @@ void CSatchel::Holster( int skiplocal /* = 0 */ )
 	{
 		SendWeaponAnim( SATCHEL_DROP );
 	}
-	EMIT_SOUND(ENT(m_pPlayer->pev), CHAN_WEAPON, "common/null.wav", 1.0, ATTN_NORM);
 
 	if ( !m_pPlayer->m_rgAmmo[m_iPrimaryAmmoType] && !m_chargeReady )
 	{
@@ -326,8 +330,6 @@ void CSatchel::Holster( int skiplocal /* = 0 */ )
 		SetNextThink( 0.1 );
 	}
 }
-
-
 
 void CSatchel::PrimaryAttack()
 {
@@ -410,6 +412,8 @@ void CSatchel::Throw( void )
 		m_chargeReady = 1;
 		
 		m_pPlayer->m_rgAmmo[m_iPrimaryAmmoType]--;
+
+		EMIT_SOUND(ENT(m_pPlayer->pev), CHAN_WEAPON, "weapons/grenade_throw.wav", 1.0, ATTN_NORM);
 
 		m_flNextPrimaryAttack = UTIL_WeaponTimeBase() + 1.0;
 		m_flNextSecondaryAttack = UTIL_WeaponTimeBase() + 0.5;

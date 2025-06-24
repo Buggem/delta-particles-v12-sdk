@@ -19,19 +19,6 @@
 #include "pm_materials.h"
 
 
-//LRC - code for Werner Spahl's mod.
-//#define XENWARRIOR
-
-#ifdef XENWARRIOR
-#define SOUND_FLASHLIGHT_IDLE   "ambience/alien_clicker1.wav"
-#define LF_FLASH_RESUME (1<<13)
-#define LF_FLASH_RESUME2 (1<<14)
-
-extern float g_fEnvFadeTime;
-#endif
-
-
-
 #define PLAYER_FATAL_FALL_SPEED		1024// approx 60 feet
 #define PLAYER_MAX_SAFE_FALL_SPEED	580// approx 20 feet
 #define DAMAGE_FOR_FALL_SPEED		(float) 100 / ( PLAYER_FATAL_FALL_SPEED - PLAYER_MAX_SAFE_FALL_SPEED )// damage per unit per second.
@@ -72,6 +59,9 @@ extern float g_fEnvFadeTime;
 
 #define	SOUND_FLASHLIGHT_ON		"items/flashlight1.wav"
 #define	SOUND_FLASHLIGHT_OFF	"items/flashlight1.wav"
+
+#define SOUND_NVG_ON "items/nvg_on.wav"
+#define SOUND_NVG_OFF "items/nvg_off.wav"
 
 #define TEAM_NAME_LENGTH	16
 
@@ -120,9 +110,10 @@ public:
 	int					m_afButtonPressed;
 	int					m_afButtonReleased;
 	
-	edict_t			   *m_pentSndLast;			// last sound entity to modify player room type
-	float				m_flSndRoomtype;		// last roomtype set by sound entity
+	edict_t				*m_pentSndLast;			// last sound entity to modify player room type
+	int					m_SndRoomtype;			// last roomtype set by sound entity
 	float				m_flSndRange;			// dist from player to sound entity
+	int					m_ClientSndRoomtype;
 
 	float				m_flFallVelocity;
 	
@@ -167,6 +158,8 @@ public:
 	BOOL				m_fWeapon;				// Set this to FALSE to force a reset of the current weapon HUD info
 
 	EHANDLE				m_pTank;				// the tank which the player is currently controlling,  NULL if no tank
+	EHANDLE				m_hViewEntity;			// The view entity being used, or null if the player is using itself as the view entity
+	bool				m_bResetViewEntity;		//True if the player's view needs to be set back to the view entity
 	float				m_fDeadTime;			// the time at which the player died  (used in PlayerDeathThink())
 
 	BOOL			m_fNoPlayerSound;	// a debugging feature. Player makes no sound if this is true. 
@@ -186,6 +179,7 @@ public:
 	CBasePlayerItem *m_pActiveItem;
 	CBasePlayerItem *m_pClientActiveItem;  // client version of the active item
 	CBasePlayerItem *m_pLastItem;
+	CBasePlayerItem *m_pNextItem;
 	// shared ammo slots
 	int	m_rgAmmo[MAX_AMMO_SLOTS];
 	int	m_rgAmmoLast[MAX_AMMO_SLOTS];
@@ -232,7 +226,7 @@ public:
 	void RenewItems(void);
 	void PackDeadPlayerItems( void );
 	void RemoveAllItems( BOOL removeSuit );
-	void RemoveItems( int iWeaponMask, int i9mm, int i357, int iBuck, int iBolt, int iARGren, int iRock, int iEgon, int iSatchel, int iSnark, int iTrip, int iGren, int iHornet );
+	void RemoveItems( int iWeaponMask, int i9mm, int i357, int iBuck, int iBolt, int iARGren, int iRock, int iUranium, int iSatchel, int iSnark, int iTrip, int iGren, int iHornet );
 	void RemoveAmmo( const char* szName, int iAmount );
 	BOOL SwitchWeapon( CBasePlayerItem *pWeapon );
 
@@ -247,7 +241,7 @@ public:
 	BOOL			IsOnLadder( void );
 	BOOL			FlashlightIsOn( void );
 	void			FlashlightTurnOn( void );
-	void			FlashlightTurnOff( void );
+	void			FlashlightTurnOff( bool playOffSound = true );
 	
 	void UpdatePlayerSound ( void );
 	void DeathSound ( void );
@@ -276,6 +270,7 @@ public:
 	void SelectNextItem( int iItem );
 	void SelectLastItem(void);
 	void SelectItem(const char *pstr);
+	void QueueItem(CBasePlayerItem *pItem);
 	void ItemPreFrame( void );
 	void ItemPostFrame( void );
 	void GiveNamedItem( const char *szName );
@@ -311,7 +306,7 @@ public:
 	void SetCustomDecalFrames( int nFrames );
 	int GetCustomDecalFrames( void );
 
-	void CBasePlayer::TabulateAmmo( void );
+	void TabulateAmmo( void );
 
 	float m_flStartCharge;
 	float m_flAmmoStartCharge;
@@ -328,7 +323,30 @@ public:
 	char m_SbarString1[ SBAR_STRING_SIZE ];
 	
 	float m_flNextChatTime;
-	
+
+	BOOL	m_fNVGisON;
+
+	void UpdateSuitLightBattery(bool on);
+	bool HasNVG() { return (pev->weapons & (1<<WEAPON_SUIT)) != 0; }
+	bool NVGIsOn() { return m_fNVGisON != FALSE; }
+	void NVGToggle();
+	void NVGTurnOn();
+	void NVGTurnOff( bool playOffSound = true );
+
+	// achievement related
+	void SetAchievement(const char* ID);
+	static CBasePlayer *PlayerInstance( entvars_t *pev );
+
+	short m_sodaDrunkCount;
+	short m_decapitatedCount;
+	short m_controllersKilledByAR;
+	short m_treesKilled;
+	short m_technicianCharges;
+	short m_robotsKilledByMelee;
+	short m_headcrabsKilledBySniper;
+
+	short m_highNoonKills;
+	short m_killedByRailgunCount; // no need to save, just need to test for 2 or more on the same frame
 };
 
 #define AUTOAIM_2DEGREES  0.0348994967025

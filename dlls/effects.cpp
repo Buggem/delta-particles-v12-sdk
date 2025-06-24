@@ -25,6 +25,7 @@
 #include "player.h" //LRC - footstep stuff
 #include "locus.h" //LRC - locus utilities
 #include "movewith.h" //LRC - the DesiredThink system
+#include "ach_counters.h"
 
 #define	SF_GIBSHOOTER_REPEATABLE	1 // allows a gibshooter to be refired
 
@@ -215,13 +216,13 @@ void CBeam::Precache( void )
 
 void CBeam::SetStartEntity( int entityIndex ) 
 { 
-	pev->sequence = (entityIndex & 0x0FFF) | ((pev->sequence&0xF000)<<12); 
+	pev->sequence = (entityIndex & 0x0FFF) | (pev->sequence & 0xF000);
 	pev->owner = g_engfuncs.pfnPEntityOfEntIndex( entityIndex );
 }
 
 void CBeam::SetEndEntity( int entityIndex ) 
 { 
-	pev->skin = (entityIndex & 0x0FFF) | ((pev->skin&0xF000)<<12); 
+	pev->skin = (entityIndex & 0x0FFF) | (pev->skin & 0xF000);
 	pev->aiment = g_engfuncs.pfnPEntityOfEntIndex( entityIndex );
 }
 
@@ -1685,6 +1686,9 @@ void CSprite::Use( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE useTy
 #define SF_ENVMODEL_OFF			1
 #define SF_ENVMODEL_DROPTOFLOOR	2
 #define SF_ENVMODEL_SOLID		4
+#define SF_ENVMODEL_INVLIGHT	8
+#define SF_ENVMODEL_CLIENTSIDEANIM 16
+#define SF_ENVMODEL_SKYMODEL	32
 
 class CEnvModel : public CBaseAnimating
 {
@@ -1706,6 +1710,8 @@ class CEnvModel : public CBaseAnimating
 	string_t m_iszSequence_Off;
 	int m_iAction_On;
 	int m_iAction_Off;
+	float m_savedFrame;
+	float m_savedAnimTime;
 };
 
 TYPEDESCRIPTION CEnvModel::m_SaveData[] =
@@ -1714,6 +1720,8 @@ TYPEDESCRIPTION CEnvModel::m_SaveData[] =
 	DEFINE_FIELD( CEnvModel, m_iszSequence_Off, FIELD_STRING ),
 	DEFINE_FIELD( CEnvModel, m_iAction_On, FIELD_INTEGER ),
 	DEFINE_FIELD( CEnvModel, m_iAction_Off, FIELD_INTEGER ),
+	DEFINE_FIELD( CEnvModel, m_savedFrame, FIELD_FLOAT ),
+	DEFINE_FIELD( CEnvModel, m_savedAnimTime, FIELD_TIME ),
 };
 
 IMPLEMENT_SAVERESTORE( CEnvModel, CBaseAnimating );
@@ -1765,17 +1773,28 @@ void CEnvModel :: Spawn( void )
 		DROP_TO_FLOOR ( ENT(pev) );
 	}
 
+	if (pev->spawnflags & SF_ENVMODEL_INVLIGHT)
+	{
+		pev->effects |= EF_INVLIGHT;
+	}
+
+	if (FBitSet(pev->spawnflags, SF_ENVMODEL_SKYMODEL)) {
+		pev->effects |= EF_MODEL_SKY;
+	}
+
 	SetBoneController( 0, 0 );
 	SetBoneController( 1, 0 );
 
 	SetSequence();
-	
+
 	SetNextThink( 0.1 );
 }
 
 void CEnvModel::Precache( void )
 {
 	PRECACHE_MODEL( (char *)STRING(pev->model) );
+	pev->frame = m_savedFrame;
+	pev->animtime = m_savedAnimTime;
 }
 
 STATE CEnvModel::GetState( void )
@@ -1806,7 +1825,33 @@ void CEnvModel::Think( void )
 
 //	ALERT(at_console, "env_model Think fr=%f\n", pev->framerate);
 
-	StudioFrameAdvance ( ); // set m_fSequenceFinished if necessary
+	if (!FBitSet(pev->spawnflags, SF_ENVMODEL_CLIENTSIDEANIM))
+		StudioFrameAdvance ( ); // set m_fSequenceFinished if necessary
+	else
+	{
+		// Still do calculations, but save result to m_savedFrame
+		float flInterval = (gpGlobals->time - m_savedAnimTime);
+		if (flInterval <= 0.001)
+		{
+			m_savedAnimTime = gpGlobals->time;
+		}
+		else
+		{
+			if (!m_savedAnimTime)
+				flInterval = 0.0;
+			m_savedFrame += flInterval * m_flFrameRate * pev->framerate;
+			m_savedAnimTime = gpGlobals->time;
+
+			if (m_savedFrame < 0.0 || m_savedFrame >= 256.0)
+			{
+				if (m_fSequenceLoops)
+					m_savedFrame -= (int)(m_savedFrame / 256.0) * 256.0;
+				else
+					m_savedFrame = (m_savedFrame < 0.0) ? 0 : 255;
+				m_fSequenceFinished = TRUE;
+			}
+		}
+	}
 
 //	if (m_fSequenceLoops)
 //	{
@@ -1866,6 +1911,8 @@ void CEnvModel :: SetSequence( void )
 
 	pev->frame = 0;
 	ResetSequenceInfo( );
+	m_savedFrame = pev->frame;
+	m_savedAnimTime = pev->animtime;
 
 	if (pev->spawnflags & SF_ENVMODEL_OFF)
 	{
@@ -2225,9 +2272,10 @@ LINK_ENTITY_TO_CLASS( env_shooter, CEnvShooter );
 
 void CEnvShooter::Spawn( void )
 {
-	int iBody = pev->body;
-	CGibShooter::Spawn();
-	pev->body = iBody;
+	Precache();
+	SetMovedir ( pev );
+	if (pev->body == 0)
+		pev->body = MODEL_FRAMES( m_iGibModelIndex );
 }
 
 void CEnvShooter :: KeyValue( KeyValueData *pkvd )
@@ -2258,7 +2306,9 @@ void CEnvShooter :: KeyValue( KeyValueData *pkvd )
 		case 4:
 			m_iGibMaterial = matRocks;
 			break;
-		
+		case 5:
+			m_iGibMaterial = matShells;
+			break;
 		default:
 		case -1:
 			m_iGibMaterial = matNone;
@@ -2323,20 +2373,32 @@ CBaseEntity *CEnvShooter :: CreateGib ( Vector vecPos, Vector vecVel )
 			UTIL_SetSize ( pGib->pev, Vector ( 0, 0 ,0 ), Vector ( 0, 0, 0 ) );
 			pGib->SetTouch(&CGib::StickyGibTouch);
 		}
-		if ( pev->body > 0 )
-			pGib->pev->body = RANDOM_LONG( 0, pev->body-1 );
+
 		if (m_iBloodColor)
 			pGib->m_bloodColor = m_iBloodColor;
 		else
 			pGib->m_bloodColor = DONT_BLEED;
 	pGib->m_material = m_iGibMaterial;
 
+	if ( pev->body <= 1 )
+	{
+		ALERT ( at_aiconsole, "EnvShooter Body is <= 1!\n" );
+	}
+
+	pGib->pev->body = RANDOM_LONG ( 0, 15 );
+
+	if ( pev->skin <= 1 )
+	{
+		ALERT ( at_aiconsole, "EnvShooter Skin is <= 1!\n" );
+	}
+
+	pGib->pev->skin = RANDOM_LONG ( 0, 5 );
+
 	pGib->pev->rendermode = pev->rendermode;
 	pGib->pev->renderamt = pev->renderamt;
 	pGib->pev->rendercolor = pev->rendercolor;
 	pGib->pev->renderfx = pev->renderfx;
 	pGib->pev->scale = pev->scale;
-	pGib->pev->skin = pev->skin;
 
 		float thinkTime = pGib->m_fNextThink - gpGlobals->time;
 
@@ -2808,32 +2870,11 @@ void CFade::Use( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE useType
 	{
 		if ( pActivator->IsNetClient() )
 		{
-			#ifdef XENWARRIOR
-			if (pActivator->IsPlayer() && ((CBasePlayer*)pActivator)->FlashlightIsOn())
-			{
-				((CBasePlayer*)pActivator)->FlashlightTurnOff();
-				if (pev->spawnflags & SF_FADE_PERMANENT)
-					g_fEnvFadeTime = gpGlobals->time + 1E6;
-				else
-					g_fEnvFadeTime = gpGlobals->time + Duration() + HoldTime();
-			}
-			#endif
-
 			UTIL_ScreenFade( pActivator, pev->rendercolor, Duration(), HoldTime(), pev->renderamt, fadeFlags );
 		}
 	}
 	else
 	{
-		#ifdef XENWARRIOR
-		CBasePlayer *pPlayer = (CBasePlayer*)UTIL_FindEntityByTargetname(NULL, "*player");
-		if (pPlayer)
-			((CBasePlayer*)pPlayer)->FlashlightTurnOff();
-		if (pev->spawnflags & SF_FADE_PERMANENT)
-			g_fEnvFadeTime = gpGlobals->time + 1E6;
-		else
-			g_fEnvFadeTime = gpGlobals->time + Duration() + HoldTime();
-		#endif
-
 		UTIL_ScreenFadeAll( pev->rendercolor, Duration(), HoldTime(), pev->renderamt, fadeFlags );
 	}
 	SUB_UseTargets( this, USE_TOGGLE, 0 );
@@ -3964,7 +4005,7 @@ void CEnvDLight::Use( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE us
 	{
 		if (pev->spawnflags & SF_DLIGHT_ONLYONCE)
 		{
-			SetThink( SUB_Remove );
+			SetThink( &CEnvDLight::SUB_Remove );
 			SetNextThink( 0 );
 		}
 	}
@@ -3998,7 +4039,7 @@ void CEnvDLight::Think( void )
 
 	if (pev->spawnflags & SF_DLIGHT_ONLYONCE)
 	{
-		SetThink( SUB_Remove );
+		SetThink( &CEnvDLight::SUB_Remove );
 		SetNextThink( 0 );
 	}
 }
@@ -4177,7 +4218,8 @@ public:
 void CEnvBeverage :: Precache ( void )
 {
 	PRECACHE_MODEL( "models/can.mdl" );
-	PRECACHE_SOUND( "weapons/g_bounce3.wav" );
+	PRECACHE_SOUND( "items/can_drop1.wav" );
+	PRECACHE_SOUND( "items/can_use1.wav" );
 }
 
 LINK_ENTITY_TO_CLASS( env_beverage, CEnvBeverage );
@@ -4244,7 +4286,8 @@ void CItemSoda :: Precache ( void )
 {
 	// added for Nemo1024  --LRC
 	PRECACHE_MODEL( "models/can.mdl" );
-	PRECACHE_SOUND( "weapons/g_bounce3.wav" );
+	PRECACHE_SOUND( "items/can_drop1.wav" );
+	PRECACHE_SOUND( "items/can_use1.wav" );
 }
 
 LINK_ENTITY_TO_CLASS( item_sodacan, CItemSoda );
@@ -4258,13 +4301,14 @@ void CItemSoda::Spawn( void )
 	SET_MODEL ( ENT(pev), "models/can.mdl" );
 	UTIL_SetSize ( pev, Vector ( 0, 0, 0 ), Vector ( 0, 0, 0 ) );
 	
+	EMIT_SOUND (ENT(pev), CHAN_WEAPON, "items/can_drop1.wav", 1, ATTN_NORM );
+
 	SetThink(&CItemSoda::CanThink);
 	SetNextThink( 0.5 );
 }
 
 void CItemSoda::CanThink ( void )
 {
-	EMIT_SOUND (ENT(pev), CHAN_WEAPON, "weapons/g_bounce3.wav", 1, ATTN_NORM );
 
 	pev->solid = SOLID_TRIGGER;
 	UTIL_SetSize ( pev, Vector ( -8, -8, 0 ), Vector ( 8, 8, 8 ) );
@@ -4279,9 +4323,15 @@ void CItemSoda::CanTouch ( CBaseEntity *pOther )
 		return;
 	}
 
-	// spoit sound here
+	CBasePlayer* pPlayer = (CBasePlayer*)pOther;
+	pPlayer->m_sodaDrunkCount++;
+	if (pPlayer->m_sodaDrunkCount == ACH_EMPLOYERS_EXPENSE_COUNT)
+	{
+		pPlayer->SetAchievement("ACH_EMPLOYERS_EXPENSE");
+	}
 
 	pOther->TakeHealth( 1, DMG_GENERIC );// a bit of health.
+	EMIT_SOUND(ENT(pev), CHAN_STATIC, "items/can_use1.wav", 1, ATTN_NORM);
 
 	if ( !FNullEnt( pev->owner ) )
 	{
@@ -4538,7 +4588,6 @@ void CEnvFog :: SendData ( Vector col, int iFadeTime, int iStartDist, int iEndDi
 }
 
 LINK_ENTITY_TO_CLASS( env_fog, CEnvFog );
-
 //=========================================================
 // LRC - env_sky, an unreal tournament-style sky effect
 //=========================================================
@@ -4568,8 +4617,6 @@ void CEnvSky :: Think ()
 }
 
 LINK_ENTITY_TO_CLASS( env_sky, CEnvSky );
-
-
 
 //=========================================================
 // LRC - env_particle, uses the aurora particle system

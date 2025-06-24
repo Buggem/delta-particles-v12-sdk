@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2002, Valve LLC, All rights reserved. ============
+//========= Copyright (c) 1996-2002, Valve LLC, All rights reserved. ============
 //
 // Purpose: 
 //
@@ -29,6 +29,7 @@ extern "C"
 
 #include "vgui_TeamFortressViewport.h"
 
+#include "steam_integration.h"
 
 extern "C" 
 {
@@ -987,9 +988,9 @@ void InitInput (void)
 	cl_yawspeed			= gEngfuncs.pfnRegisterVariable ( "cl_yawspeed", "210", 0 );
 	cl_pitchspeed		= gEngfuncs.pfnRegisterVariable ( "cl_pitchspeed", "225", 0 );
 	cl_upspeed			= gEngfuncs.pfnRegisterVariable ( "cl_upspeed", "320", 0 );
-	cl_forwardspeed		= gEngfuncs.pfnRegisterVariable ( "cl_forwardspeed", "400", FCVAR_ARCHIVE );
-	cl_backspeed		= gEngfuncs.pfnRegisterVariable ( "cl_backspeed", "400", FCVAR_ARCHIVE );
-	cl_sidespeed		= gEngfuncs.pfnRegisterVariable ( "cl_sidespeed", "400", 0 );
+	cl_forwardspeed		= gEngfuncs.pfnRegisterVariable ( "cl_forwardspeed", "230", FCVAR_ARCHIVE );
+	cl_backspeed		= gEngfuncs.pfnRegisterVariable ( "cl_backspeed", "200", FCVAR_ARCHIVE );
+	cl_sidespeed		= gEngfuncs.pfnRegisterVariable ( "cl_sidespeed", "230", 0 );
 	cl_movespeedkey		= gEngfuncs.pfnRegisterVariable ( "cl_movespeedkey", "0.3", 0 );
 	cl_pitchup			= gEngfuncs.pfnRegisterVariable ( "cl_pitchup", "89", 0 );
 	cl_pitchdown		= gEngfuncs.pfnRegisterVariable ( "cl_pitchdown", "89", 0 );
@@ -1025,4 +1026,5 @@ void ShutdownInput (void)
 void DLLEXPORT HUD_Shutdown( void )
 {
 	ShutdownInput();
+	ShutdownSteam();
 }

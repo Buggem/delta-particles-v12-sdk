@@ -158,6 +158,7 @@ public:
 	static	void SpawnHeadGib( entvars_t *pevVictim );
 	static	void SpawnHeadGib( entvars_t *pevVictim, const char *szGibModel );
 	static	void SpawnRandomGibs( entvars_t *pevVictim, int cGibs, int human );
+	static	void SpawnTreeGibs( entvars_t *pevVictim, int cGibs );
 	static	void SpawnRandomGibs( entvars_t *pevVictim, int cGibs, int notfirst, const char *szGibModel ); //LRC
 	static  void SpawnStickyGibs( entvars_t *pevVictim, Vector vecOrigin, int cGibs );
 

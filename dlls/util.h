@@ -87,13 +87,9 @@ typedef int BOOL;
 // This is the glue that hooks .MAP entity class names to our CPP classes
 // The _declspec forces them to be exported by name so we can do a lookup with GetProcAddress()
 // The function is used to intialize / allocate the object for the entity
-#ifdef _WIN32
 #define LINK_ENTITY_TO_CLASS(mapClassName,DLLClassName) \
-	extern "C" _declspec( dllexport ) void mapClassName( entvars_t *pev ); \
+	extern "C" DLLEXPORT void mapClassName( entvars_t *pev ); \
 	void mapClassName( entvars_t *pev ) { GetClassPtr( (DLLClassName *)pev ); }
-#else
-#define LINK_ENTITY_TO_CLASS(mapClassName,DLLClassName) extern "C" void mapClassName( entvars_t *pev ); void mapClassName( entvars_t *pev ) { GetClassPtr( (DLLClassName *)pev ); }
-#endif
 
 
 //
@@ -202,6 +198,12 @@ typedef enum
 	TS_GOING_DOWN
 	} TOGGLE_STATE;
 
+typedef enum {
+	NLE_PROHIBIT = 0,
+	NLE_ALLOW,
+	NLE_NEEDS_INPUT
+} NODE_LINKENT;
+
 // Misc useful
 inline BOOL FStrEq(const char*sz1, const char*sz2)
 	{ return (strcmp(sz1, sz2) == 0); }
@@ -270,7 +272,7 @@ typedef enum { ignore_monsters=1, dont_ignore_monsters=0, missile=2 } IGNORE_MON
 typedef enum { ignore_glass=1, dont_ignore_glass=0 } IGNORE_GLASS;
 extern void			UTIL_TraceLine			(const Vector &vecStart, const Vector &vecEnd, IGNORE_MONSTERS igmon, edict_t *pentIgnore, TraceResult *ptr);
 extern void			UTIL_TraceLine			(const Vector &vecStart, const Vector &vecEnd, IGNORE_MONSTERS igmon, IGNORE_GLASS ignoreGlass, edict_t *pentIgnore, TraceResult *ptr);
-typedef enum { point_hull=0, human_hull=1, large_hull=2, head_hull=3 };
+enum { point_hull=0, human_hull=1, large_hull=2, head_hull=3 };
 extern void			UTIL_TraceHull			(const Vector &vecStart, const Vector &vecEnd, IGNORE_MONSTERS igmon, int hullNumber, edict_t *pentIgnore, TraceResult *ptr);
 extern TraceResult	UTIL_GetGlobalTrace		(void);
 extern void			UTIL_TraceModel			(const Vector &vecStart, const Vector &vecEnd, int hullNumber, edict_t *pentModel, TraceResult *ptr);
@@ -363,6 +365,8 @@ extern void			UTIL_LogPrintf( char *fmt, ... );
 extern float UTIL_DotPoints ( const Vector &vecSrc, const Vector &vecCheck, const Vector &vecDir );
 
 extern void UTIL_StripToken( const char *pKey, char *pDest );// for redundant keynames
+
+extern void UTIL_ShowCaption(const char* messageId, int holdTime, bool radio);
 
 // Misc functions
 extern void SetMovedir(entvars_t* pev);
@@ -571,5 +575,8 @@ float UTIL_SharedRandomFloat( unsigned int seed, float low, float high );
 float UTIL_WeaponTimeBase( void );
 int GetStdLightStyle (int iStyle); //LRC- declared here so it can be used by everything that
 									// needs to deal with the standard lightstyles.
+void UTIL_SetModel( edict_t *e, const char *model );
+int UTIL_PrecacheModel( char* s );
+
 // LRC- for aliases and groups
 CBaseEntity* UTIL_FollowReference( CBaseEntity* pStartEntity, const char* szName );

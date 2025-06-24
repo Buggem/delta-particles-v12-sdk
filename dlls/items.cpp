@@ -216,6 +216,7 @@ class CItemBattery : public CItem
 			SET_MODEL(ENT(pev), STRING(pev->model)); //LRC
 		else
 			SET_MODEL(ENT(pev), "models/w_battery.mdl");
+
 		CItem::Spawn( );
 	}
 	void Precache( void )
@@ -228,7 +229,7 @@ class CItemBattery : public CItem
 		if (pev->noise)
 			PRECACHE_SOUND( (char*)STRING(pev->noise) ); //LRC
 		else
-			PRECACHE_SOUND( "items/gunpickup2.wav" );
+			PRECACHE_SOUND( "items/battery1.wav" );
 	}
 	BOOL MyTouch( CBasePlayer *pPlayer )
 	{
@@ -252,7 +253,7 @@ class CItemBattery : public CItem
 			if (pev->noise)
 				EMIT_SOUND( pPlayer->edict(), CHAN_ITEM, STRING(pev->noise), 1, ATTN_NORM ); //LRC
 			else
-				EMIT_SOUND( pPlayer->edict(), CHAN_ITEM, "items/gunpickup2.wav", 1, ATTN_NORM );
+				EMIT_SOUND( pPlayer->edict(), CHAN_ITEM, "items/battery1.wav", 1, ATTN_NORM );
 
 			MESSAGE_BEGIN( MSG_ONE, gmsgItemPickup, NULL, pPlayer->pev );
 				WRITE_STRING( STRING(pev->classname) );
@@ -261,14 +262,12 @@ class CItemBattery : public CItem
 			
 			// Suit reports new power level
 			// For some reason this wasn't working in release build -- round it.
-			pct = (int)( (float)(pPlayer->pev->armorvalue * 100.0) * (1.0/MAX_NORMAL_BATTERY) + 0.5);
-			pct = (pct / 5);
-			if (pct > 0)
-				pct--;
-		
-			sprintf( szcharge,"!HEV_%1dP", pct );
-			
-			//EMIT_SOUND_SUIT(ENT(pev), szcharge);
+			pct = pPlayer->pev->armorvalue;
+			if (pct == 100)
+				pct = 0; // special case for 100%
+
+				sprintf( szcharge,"!HEV_%1dP", pct);
+
 			pPlayer->SetSuitUpdate(szcharge, FALSE, SUIT_NEXT_IN_30SEC);
 			return TRUE;		
 		}
@@ -277,7 +276,6 @@ class CItemBattery : public CItem
 };
 
 LINK_ENTITY_TO_CLASS(item_battery, CItemBattery);
-
 
 class CItemAntidote : public CItem
 {
@@ -301,7 +299,6 @@ class CItemAntidote : public CItem
 };
 
 LINK_ENTITY_TO_CLASS(item_antidote, CItemAntidote);
-
 
 class CItemSecurity : public CItem
 {

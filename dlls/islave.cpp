@@ -54,6 +54,9 @@ public:
 	void CallForHelp( char *szClassname, float flDist, EHANDLE hEnemy, Vector &vecLocation );
 	void TraceAttack( entvars_t *pevAttacker, float flDamage, Vector vecDir, TraceResult *ptr, int bitsDamageType);
 	int TakeDamage( entvars_t* pevInflictor, entvars_t* pevAttacker, float flDamage, int bitsDamageType);
+	int BuckshotCount;
+	BOOL HeadGibbed;
+	Vector HeadPos;
 
 	void DeathSound( void );
 	void PainSound( void );
@@ -285,16 +288,16 @@ void CISlave :: SetYawSpeed ( void )
 	switch ( m_Activity )
 	{
 	case ACT_WALK:		
-		ys = 50;	
+		ys = 100;	
 		break;
 	case ACT_RUN:		
-		ys = 70;
+		ys = 120;
 		break;
 	case ACT_IDLE:		
-		ys = 50;
+		ys = 120;
 		break;
 	default:
-		ys = 90;
+		ys = 120;
 		break;
 	}
 
@@ -568,6 +571,10 @@ void CISlave :: Precache()
 	PRECACHE_SOUND("headcrab/hc_headbite.wav");
 	PRECACHE_SOUND("weapons/cbar_miss1.wav");
 
+	PRECACHE_SOUND("aslave/slv_step1.wav");
+	PRECACHE_SOUND("aslave/slv_step2.wav");
+	PRECACHE_SOUND("aslave/slv_step3.wav");
+
 	for ( i = 0; i < ARRAYSIZE( pAttackHitSounds ); i++ )
 		PRECACHE_SOUND((char *)pAttackHitSounds[i]);
 
@@ -598,6 +605,16 @@ int CISlave :: TakeDamage( entvars_t* pevInflictor, entvars_t* pevAttacker, floa
 	if (m_iPlayerReact == 0)
 		m_afMemory |= bits_MEMORY_PROVOKED;
 
+	if ( !HeadGibbed && (pev->health <= flDamage && BuckshotCount >= 4) )
+	{
+		SetBodygroup( 0, 1);
+
+		GibHeadMonster( HeadPos, FALSE );
+		HeadGibbed = TRUE;
+		ScoreForHeadGib(pevAttacker);
+	}
+
+	BuckshotCount = 0;
 	return CSquadMonster::TakeDamage(pevInflictor, pevAttacker, flDamage, bitsDamageType);
 }
 
@@ -607,10 +624,25 @@ void CISlave::TraceAttack( entvars_t *pevAttacker, float flDamage, Vector vecDir
 	if (bitsDamageType & DMG_SHOCK)
 		return;
 
+	if	( ptr->iHitgroup == 1 )
+	{
+		if ( (bitsDamageType & DMG_BULLET) && flDamage == gSkillData.plrDmgBuckshot )
+			BuckshotCount++;
+
+		ptr->iHitgroup = HITGROUP_HEAD;
+
+		if ( pev->health <= flDamage * gSkillData.monHead && flDamage >=10 && !HeadGibbed)
+		{
+			pev->body = 1;
+
+			GibHeadMonster( ptr->vecEndPos, FALSE );
+			HeadGibbed = TRUE;
+			ScoreForHeadGib(pevAttacker);
+		}
+	}
+
 	CSquadMonster::TraceAttack( pevAttacker, flDamage, vecDir, ptr, bitsDamageType );
 }
-
-
 //=========================================================
 // AI Schedules Specific to this monster
 //=========================================================

@@ -105,7 +105,8 @@ TYPEDESCRIPTION	CBaseMonster::m_SaveData[] =
 	DEFINE_FIELD( CBaseMonster, m_flHungryTime, FIELD_TIME ),
 	DEFINE_FIELD( CBaseMonster, m_flDistTooFar, FIELD_FLOAT ),
 	DEFINE_FIELD( CBaseMonster, m_flDistLook, FIELD_FLOAT ),
-	DEFINE_FIELD( CBaseMonster, m_iTriggerCondition, FIELD_INTEGER ),
+	DEFINE_FIELD( CBaseMonster, m_iTriggerCondition, FIELD_SHORT ),
+	DEFINE_FIELD( CBaseMonster, m_iTriggerAltCondition, FIELD_SHORT ),
 	DEFINE_FIELD( CBaseMonster, m_iszTriggerTarget, FIELD_STRING ),
 
 	DEFINE_FIELD( CBaseMonster, m_HackedGunPos, FIELD_VECTOR ),
@@ -581,7 +582,8 @@ void CBaseMonster :: MonsterThink ( void )
 //=========================================================
 void CBaseMonster :: MonsterUse ( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE useType, float value )
 {
-	m_IdealMonsterState = MONSTERSTATE_ALERT;
+	if (m_MonsterState == MONSTERSTATE_IDLE)
+		m_IdealMonsterState = MONSTERSTATE_ALERT;
 }
 
 //=========================================================
@@ -1233,13 +1235,19 @@ void CBaseMonster :: SetActivity ( Activity NewActivity )
 
 	iSequence = LookupActivity ( NewActivity );
 
+	Activity OldActivity = m_Activity;
+	m_Activity = NewActivity; // Go ahead and set this so it doesn't keep trying when the anim is not present
+
+	// In case someone calls this with something other than the ideal activity
+	m_IdealActivity = m_Activity;
+
 	// Set to the desired anim, or default anim if the desired is not present
 	if ( iSequence > ACTIVITY_NOT_AVAILABLE )
 	{
 		if ( pev->sequence != iSequence || !m_fSequenceLoops )
 		{
 			// don't reset frame between walk and run
-			if ( !(m_Activity == ACT_WALK || m_Activity == ACT_RUN) || !(NewActivity == ACT_WALK || NewActivity == ACT_RUN))
+			if( !( OldActivity == ACT_WALK || OldActivity == ACT_RUN ) || !( NewActivity == ACT_WALK || NewActivity == ACT_RUN ) )
 				pev->frame = 0;
 		}
 
@@ -1253,13 +1261,6 @@ void CBaseMonster :: SetActivity ( Activity NewActivity )
 		ALERT ( at_debug, "%s has no sequence for act:%d\n", STRING(pev->classname), NewActivity );
 		pev->sequence		= 0;	// Set to the reset anim (if it's there)
 	}
-
-	m_Activity = NewActivity; // Go ahead and set this so it doesn't keep trying when the anim is not present
-	
-	// In case someone calls this with something other than the ideal activity
-	m_IdealActivity = m_Activity;
-
-
 }
 
 //=========================================================
@@ -1414,17 +1415,14 @@ float CBaseMonster :: OpenDoorAndWait( entvars_t *pevDoor )
 
 	//ALERT(at_aiconsole, "A door. ");
 	CBaseEntity *pcbeDoor = CBaseEntity::Instance(pevDoor);
-	if (pcbeDoor && !pcbeDoor->IsLockedByMaster())
+	if (pcbeDoor)
 	{
 		//ALERT(at_aiconsole, "unlocked! ");
-		pcbeDoor->Use(this, this, USE_ON, 0.0);
+		flTravelTime = pcbeDoor->InputByMonster(this);
 		//ALERT(at_aiconsole, "pevDoor->nextthink = %d ms\n", (int)(1000*pevDoor->nextthink));
 		//ALERT(at_aiconsole, "pevDoor->ltime = %d ms\n", (int)(1000*pevDoor->ltime));
 		//ALERT(at_aiconsole, "pev-> nextthink = %d ms\n", (int)(1000*pev->nextthink));
 		//ALERT(at_aiconsole, "pev->ltime = %d ms\n", (int)(1000*pev->ltime));
-
-		flTravelTime = pcbeDoor->m_fNextThink - pevDoor->ltime;
-
 		//ALERT(at_aiconsole, "Waiting %d ms\n", (int)(1000*flTravelTime));
 		if ( pcbeDoor->pev->targetname )
 		{
@@ -1438,7 +1436,7 @@ float CBaseMonster :: OpenDoorAndWait( entvars_t *pevDoor )
 				if ( VARS( pTarget->pev ) != pcbeDoor->pev &&
 						FClassnameIs ( pTarget->pev, STRING(pcbeDoor->pev->classname) ) )
 				{
-					pTarget->Use(this, this, USE_ON, 0.0);
+					pTarget->InputByMonster(this);
 				}
 			}
 		}
@@ -1488,7 +1486,8 @@ void CBaseMonster :: AdvanceRoute ( float distance )
 				if ( iLink >= 0 && WorldGraph.m_pLinkPool[iLink].m_pLinkEnt != NULL )
 				{
 					//ALERT(at_aiconsole, "A link. ");
-					if ( WorldGraph.HandleLinkEnt ( iSrcNode, WorldGraph.m_pLinkPool[iLink].m_pLinkEnt, m_afCapability, CGraph::NODEGRAPH_DYNAMIC ) )
+					const int afCapMask = m_afCapability | (FBitSet(pev->flags, FL_MONSTERCLIP) ? bits_CAP_MONSTERCLIPPED : 0);
+					if ( WorldGraph.HandleLinkEnt ( iSrcNode, WorldGraph.m_pLinkPool[iLink].m_pLinkEnt, afCapMask, CGraph::NODEGRAPH_DYNAMIC ) == NLE_NEEDS_INPUT )
 					{
 						//ALERT(at_aiconsole, "usable.");
 						entvars_t *pevDoor = WorldGraph.m_pLinkPool[iLink].m_pLinkEnt;
@@ -2052,6 +2051,8 @@ void CBaseMonster :: MonsterInit ( void )
 	SetThink(&CBaseMonster :: MonsterInitThink );
 	SetNextThink( 0.1 );
 	SetUse(&CBaseMonster :: MonsterUse );
+
+	m_flLastYawTime = gpGlobals->time;
 }
 
 //=========================================================
@@ -2549,13 +2550,23 @@ float	CBaseMonster::FlYawDiff ( void )
 //=========================================================
 float CBaseMonster::ChangeYaw ( int yawSpeed )
 {
+	extern cvar_t monsteryawspeedfix;
+
 	float		ideal, current, move, speed;
 
 	current = UTIL_AngleMod( pev->angles.y );
 	ideal = pev->ideal_yaw;
 	if (current != ideal)
 	{
-		speed = (float)yawSpeed * gpGlobals->frametime * 10;
+		if( monsteryawspeedfix.value )
+		{
+			float delta;
+			delta = min( gpGlobals->time - m_flLastYawTime, 0.25f );
+			speed = (float)yawSpeed * delta * 2;
+		}
+		else
+			speed = (float)yawSpeed * gpGlobals->frametime * 10;
+
 		move = ideal - current;
 
 		if (ideal > current)
@@ -2594,6 +2605,8 @@ float CBaseMonster::ChangeYaw ( int yawSpeed )
 	}
 	else
 		move = 0;
+
+	m_flLastYawTime = gpGlobals->time;
 
 	return move;
 }
@@ -2727,6 +2740,20 @@ void CBaseMonster :: HandleAnimEvent( MonsterEvent_t *pEvent )
 		}
 		break;
 
+	case MONSTER_EVENT_BODYDROP_METAL:
+		if ( pev->flags & FL_ONGROUND )
+		{
+			if ( RANDOM_LONG( 0, 1 ) == 0 )
+			{
+				EMIT_SOUND( ENT(pev), CHAN_BODY, "robotic_infantry/ri_bodydrop1.wav", 1, ATTN_NORM );
+			}
+			else
+			{
+				EMIT_SOUND( ENT(pev), CHAN_BODY, "robotic_infantry/ri_bodydrop2.wav", 1, ATTN_NORM );
+			}
+		}
+		break;
+
 	case MONSTER_EVENT_SWISHSOUND:
 		{
 			// NO MONSTER may use this anim event unless that monster's precache precaches this sound!!!
@@ -2806,7 +2833,9 @@ BOOL CBaseMonster :: FGetNodeRoute ( Vector vecDest )
 	// valid src and dest nodes were found, so it's safe to proceed with
 	// find shortest path
 	int iNodeHull = WorldGraph.HullIndex( this ); // make this a monster virtual function
-	iResult = WorldGraph.FindShortestPath ( iPath, iSrcNode, iDestNode, iNodeHull, m_afCapability );
+
+	const int afCapMask = m_afCapability | (FBitSet(pev->flags, FL_MONSTERCLIP) ? bits_CAP_MONSTERCLIPPED : 0);
+	iResult = WorldGraph.FindShortestPath ( iPath, MAX_PATH_SIZE, iSrcNode, iDestNode, iNodeHull, afCapMask, true );
 
 	if ( !iResult )
 	{
@@ -2998,8 +3027,12 @@ void CBaseMonster :: KeyValue( KeyValueData *pkvd )
 	}
 	else if (FStrEq(pkvd->szKeyName, "TriggerCondition") )
 	{
-		m_iTriggerCondition = atoi( pkvd->szValue );
+		m_iTriggerCondition = (short)atoi( pkvd->szValue );
 		pkvd->fHandled = TRUE;
+	}
+	else if( FStrEq( pkvd->szKeyName, "TriggerAltCondition" ) )
+	{
+		m_iTriggerAltCondition = (short)atoi( pkvd->szValue );
 	}
 	else if (FStrEq(pkvd->szKeyName, "m_iClass") ) //LRC
 	{
@@ -3024,19 +3057,19 @@ void CBaseMonster :: KeyValue( KeyValueData *pkvd )
 //
 // Returns TRUE if the target is fired.
 //=========================================================
-BOOL CBaseMonster :: FCheckAITrigger ( void )
+BOOL CBaseMonster::FCheckAITrigger( short condition )
 {
 	BOOL fFireTarget;
 
-	if ( m_iTriggerCondition == AITRIGGER_NONE )
+	if( condition == AITRIGGER_NONE )
 	{
 		// no conditions, so this trigger is never fired.
-		return FALSE; 
+		return FALSE;
 	}
 
 	fFireTarget = FALSE;
 
-	switch ( m_iTriggerCondition )
+	switch( condition )
 	{
 	case AITRIGGER_SEEPLAYER_ANGRY_AT_PLAYER:
 		if ( m_hEnemy != NULL && m_hEnemy->IsPlayer() && HasConditions ( bits_COND_SEE_ENEMY ) )
@@ -3051,9 +3084,9 @@ BOOL CBaseMonster :: FCheckAITrigger ( void )
 		}
 		break;
 	case AITRIGGER_SEEPLAYER_NOT_IN_COMBAT:
-		if ( HasConditions ( bits_COND_SEE_CLIENT ) && 
-			 m_MonsterState != MONSTERSTATE_COMBAT	&& 
-			 m_MonsterState != MONSTERSTATE_PRONE	&& 
+		if ( HasConditions( bits_COND_SEE_CLIENT ) &&
+			 m_MonsterState != MONSTERSTATE_COMBAT	&&
+			 m_MonsterState != MONSTERSTATE_PRONE	&&
 			 m_MonsterState != MONSTERSTATE_SCRIPT)
 		{
 			fFireTarget = TRUE;
@@ -3112,10 +3145,19 @@ BOOL CBaseMonster :: FCheckAITrigger ( void )
 		ALERT ( at_aiconsole, "AI Trigger Fire Target\n" );
 		FireTargets( STRING( m_iszTriggerTarget ), this, this, USE_TOGGLE, 0 );
 		m_iTriggerCondition = AITRIGGER_NONE;
+		m_iTriggerAltCondition = AITRIGGER_NONE;
 		return TRUE;
 	}
 
 	return FALSE;
+}
+
+BOOL CBaseMonster::FCheckAITrigger( void )
+{
+	BOOL ret = FCheckAITrigger( m_iTriggerCondition );
+	if (!ret)
+		return FCheckAITrigger( m_iTriggerAltCondition );
+	return ret;
 }
 
 //=========================================================	
@@ -3145,7 +3187,7 @@ int CBaseMonster :: CanPlaySequence( int interruptFlags )
 			return false;
 		}
 	}
-	else if ( !IsAlive() || m_MonsterState == MONSTERSTATE_PRONE )
+	else if ( !IsFullyAlive() || m_MonsterState == MONSTERSTATE_PRONE )
 	{
 #ifdef DEBUG_CANTPLAY
 		ALERT(at_debug, "CANTPLAY: Dead/Barnacled!\n");
@@ -3493,6 +3535,10 @@ CBaseEntity* CBaseMonster :: DropItem ( char *pszItemName, const Vector &vecPos,
 
 }
 
+BOOL CBaseMonster::IsFullyAlive()
+{
+	return !HasMemory(bits_MEMORY_KILLED) && CBaseToggle::IsAlive();
+}
 
 BOOL CBaseMonster :: ShouldFadeOnDeath( void )
 {

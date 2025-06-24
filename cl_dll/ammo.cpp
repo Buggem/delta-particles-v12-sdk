@@ -19,6 +19,7 @@
 //
 
 #include "hud.h"
+#include "hud_sprite.h"
 #include "cl_util.h"
 #include "parsemsg.h"
 #include "pm_shared.h"
@@ -310,7 +311,9 @@ void CHudAmmo::Reset(void)
 	gHR.Reset();
 
 	//	VidInit();
-
+	wrect_t nullrc = {0,};
+	SetCrosshair( 0, nullrc, 0, 0, 0 ); // reset crosshair
+	m_pWeapon = NULL; // reset last weapon
 }
 
 int CHudAmmo::VidInit(void)
@@ -581,7 +584,7 @@ int CHudAmmo::MsgFunc_CurWeapon(const char *pszName, int iSize, void *pbuf )
 	int iClip = READ_CHAR();
 
 	// detect if we're also on target
-	if ( iState > 1 )
+	if ( iState & 0x40 )
 	{
 		fOnTarget = TRUE;
 	}
@@ -629,7 +632,7 @@ int CHudAmmo::MsgFunc_CurWeapon(const char *pszName, int iSize, void *pbuf )
 	}
 	else if ( !(gHUD.m_iHideHUDDisplay & ( HIDEHUD_WEAPONS | HIDEHUD_ALL )) )
 	{
-		if ( gHUD.m_iFOV >= 90 )
+		if ( gHUD.m_iFOV >= 90 && !(iState & 0x80) )
 		{ // normal crosshairs
 			if (fOnTarget && m_pWeapon->hAutoaim)
 				SetCrosshair(m_pWeapon->hAutoaim, m_pWeapon->rcAutoaim, 255, 255, 255);
@@ -891,12 +894,12 @@ int CHudAmmo::Draw(float flTime)
 	if (m_fFade > 0)
 		m_fFade -= (gHUD.m_flTimeDelta * 20);
 
-	UnpackRGB(r,g,b, gHUD.m_iHUDColor);
+	UnpackRGB(r,g, b, gHUD.m_iHUDColor);
 
 	ScaleColors(r, g, b, a );
 
 	// Does this weapon have a clip?
-	y = ScreenHeight - gHUD.m_iFontHeight - gHUD.m_iFontHeight/2;
+	y = ScaledRenderer::Instance().ScreenHeightScaled() - gHUD.m_iFontHeight - gHUD.m_iFontHeight / 2;
 
 	// Does weapon have any ammo at all?
 	if (m_pWeapon->iAmmoType > 0)
@@ -907,7 +910,7 @@ int CHudAmmo::Draw(float flTime)
 		{
 			// room for the number and the '|' and the current ammo
 			
-			x = ScreenWidth - (8 * AmmoWidth) - iIconWidth;
+			x = ScaledRenderer::Instance().ScreenWidthScaled() - ( 8 * AmmoWidth ) - iIconWidth;
 			x = gHUD.DrawHudNumber(x, y, iFlags | DHN_3DIGITS, pw->iClip, r, g, b);
 
 			wrect_t rc;
@@ -920,10 +923,11 @@ int CHudAmmo::Draw(float flTime)
 
 			x += AmmoWidth/2;
 
-			UnpackRGB(r,g,b, gHUD.m_iHUDColor);
+			UnpackRGB(r,g,b, gHUD.m_iHUDColor2);
 
 			// draw the | bar
-			FillRGBA(x, y, iBarWidth, gHUD.m_iFontHeight, r, g, b, a);
+			ScaledRenderer::Instance().FillRGBA( x, y, iBarWidth, gHUD.m_iFontHeight, r, g, b, a );
+			UnpackRGB(r,g,b, gHUD.m_iHUDColor);
 
 			x += iBarWidth + AmmoWidth/2;;
 
@@ -936,14 +940,14 @@ int CHudAmmo::Draw(float flTime)
 		else
 		{
 			// SPR_Draw a bullets only line
-			x = ScreenWidth - 4 * AmmoWidth - iIconWidth;
+			x = ScaledRenderer::Instance().ScreenWidthScaled() - 4 * AmmoWidth - iIconWidth;
 			x = gHUD.DrawHudNumber(x, y, iFlags | DHN_3DIGITS, gWR.CountAmmo(pw->iAmmoType), r, g, b);
 		}
 
 		// Draw the ammo Icon
 		int iOffset = (m_pWeapon->rcAmmo.bottom - m_pWeapon->rcAmmo.top)/8;
-		SPR_Set(m_pWeapon->hAmmo, r, g, b);
-		SPR_DrawAdditive(0, x, y - iOffset, &m_pWeapon->rcAmmo);
+		ScaledRenderer::Instance().SPR_Set( m_pWeapon->hAmmo, r, g, b );
+		ScaledRenderer::Instance().SPR_DrawAdditive( 0, x, y - iOffset, &m_pWeapon->rcAmmo );
 	}
 
 	// Does weapon have seconday ammo?
@@ -952,16 +956,16 @@ int CHudAmmo::Draw(float flTime)
 		int iIconWidth = m_pWeapon->rcAmmo2.right - m_pWeapon->rcAmmo2.left;
 
 		// Do we have secondary ammo?
-		if ((pw->iAmmo2Type != 0) && (gWR.CountAmmo(pw->iAmmo2Type) > 0))
+		if ((pw->iAmmo2Type != 0) && (gWR.CountAmmo(pw->iAmmo2Type) >= 0))
 		{
 			y -= gHUD.m_iFontHeight + gHUD.m_iFontHeight/4;
-			x = ScreenWidth - 4 * AmmoWidth - iIconWidth;
+			x = ScaledRenderer::Instance().ScreenWidthScaled() - 4 * AmmoWidth - iIconWidth;
 			x = gHUD.DrawHudNumber(x, y, iFlags|DHN_3DIGITS, gWR.CountAmmo(pw->iAmmo2Type), r, g, b);
 
 			// Draw the ammo Icon
-			SPR_Set(m_pWeapon->hAmmo2, r, g, b);
+			ScaledRenderer::Instance().SPR_Set( m_pWeapon->hAmmo2, r, g, b );
 			int iOffset = (m_pWeapon->rcAmmo2.bottom - m_pWeapon->rcAmmo2.top)/8;
-			SPR_DrawAdditive(0, x, y - iOffset, &m_pWeapon->rcAmmo2);
+			ScaledRenderer::Instance().SPR_DrawAdditive(0, x, y - iOffset, &m_pWeapon->rcAmmo2 );
 		}
 	}
 	return 1;
@@ -988,14 +992,14 @@ int DrawBar(int x, int y, int width, int height, float f)
 		if (w <= 0)
 			w = 1;
 		UnpackRGB(r, g, b, RGB_GREENISH);
-		FillRGBA(x, y, w, height, r, g, b, 255);
+		ScaledRenderer::Instance().FillRGBA( x, y, w, height, r, g, b, 255 );
 		x += w;
 		width -= w;
 	}
 
 	UnpackRGB(r, g, b, gHUD.m_iHUDColor);
 
-	FillRGBA(x, y, width, height, r, g, b, 128);
+	ScaledRenderer::Instance().FillRGBA( x, y, width, height, r, g, b, 128 );
 
 	return (x + width);
 }
@@ -1077,7 +1081,7 @@ int CHudAmmo::DrawWList(float flTime)
 			a = 192;
 
 		ScaleColors(r, g, b, 255);
-		SPR_Set(gHUD.GetSprite(m_HUD_bucket0 + i), r, g, b );
+		ScaledRenderer::Instance().SPR_Set( gHUD.GetSprite( m_HUD_bucket0 + i ), r, g, b );
 
 		// make active slot wide enough to accomodate gun pictures
 		if ( i == iActiveSlot )
@@ -1091,7 +1095,7 @@ int CHudAmmo::DrawWList(float flTime)
 		else
 			iWidth = giBucketWidth;
 
-		SPR_DrawAdditive(0, x, y, &gHUD.GetSpriteRect(m_HUD_bucket0 + i));
+		ScaledRenderer::Instance().SPR_DrawAdditive( 0, x, y, &gHUD.GetSpriteRect( m_HUD_bucket0 + i ) );
 		
 		x += iWidth + 5;
 	}
@@ -1127,11 +1131,11 @@ int CHudAmmo::DrawWList(float flTime)
 
 				if ( gpActiveSel == p )
 				{
-					SPR_Set(p->hActive, r, g, b );
-					SPR_DrawAdditive(0, x, y, &p->rcActive);
+					ScaledRenderer::Instance().SPR_Set( p->hActive, r, g, b );
+					ScaledRenderer::Instance().SPR_DrawAdditive( 0, x, y, &p->rcActive );
 
-					SPR_Set(gHUD.GetSprite(m_HUD_selection), r, g, b );
-					SPR_DrawAdditive(0, x, y, &gHUD.GetSpriteRect(m_HUD_selection));
+					ScaledRenderer::Instance().SPR_Set( gHUD.GetSprite( m_HUD_selection ), r, g, b );
+					ScaledRenderer::Instance().SPR_DrawAdditive( 0, x, y, &gHUD.GetSpriteRect( m_HUD_selection ) );
 				}
 				else
 				{
@@ -1145,8 +1149,8 @@ int CHudAmmo::DrawWList(float flTime)
 						ScaleColors(r, g, b, 128);
 					}
 
-					SPR_Set( p->hInactive, r, g, b );
-					SPR_DrawAdditive( 0, x, y, &p->rcInactive );
+					ScaledRenderer::Instance().SPR_Set( p->hInactive, r, g, b );
+					ScaledRenderer::Instance().SPR_DrawAdditive( 0, x, y, &p->rcInactive );
 				}
 
 				// Draw Ammo Bar
@@ -1174,7 +1178,7 @@ int CHudAmmo::DrawWList(float flTime)
 
 				if ( gWR.HasAmmo(p) )
 				{
-					UnpackRGB(r,g,b, gHUD.m_iHUDColor);
+					UnpackRGB(r,g,b, gHUD.m_iHUDColor2);
 					a = 128;
 				}
 				else
@@ -1183,7 +1187,7 @@ int CHudAmmo::DrawWList(float flTime)
 					a = 96;
 				}
 
-				FillRGBA( x, y, giBucketWidth, giBucketHeight, r, g, b, a );
+				ScaledRenderer::Instance().FillRGBA( x, y, giBucketWidth, giBucketHeight, r, g, b, a );
 
 				y += giBucketHeight + 5;
 			}

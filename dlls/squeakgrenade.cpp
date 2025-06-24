@@ -465,6 +465,9 @@ int CSqueak::GetItemInfo(ItemInfo *p)
 
 BOOL CSqueak::Deploy( )
 {
+	g_engfuncs.pfnSetClientMaxspeed(m_pPlayer->edict(), 230 );
+	m_flNextPrimaryAttack = UTIL_WeaponTimeBase() + 1.00;
+	m_flNextSecondaryAttack = UTIL_WeaponTimeBase() + 1.00;
 	// play hunt sound
 	float flRndSound = RANDOM_FLOAT ( 0 , 1 );
 
@@ -481,18 +484,12 @@ BOOL CSqueak::Deploy( )
 
 void CSqueak::Holster( int skiplocal /* = 0 */ )
 {
-	m_pPlayer->m_flNextAttack = UTIL_WeaponTimeBase() + 0.5;
-	
-	if ( !m_pPlayer->m_rgAmmo[ m_iPrimaryAmmoType ] )
-	{
-		m_pPlayer->pev->weapons &= ~(1<<WEAPON_SNARK);
-		SetThink(&CSqueak:: DestroyItem );
-		SetNextThink( 0.1 );
-		return;
-	}
-	
+
+	g_engfuncs.pfnSetClientMaxspeed(m_pPlayer->edict(), 230 );
+	m_pPlayer->m_flNextAttack = UTIL_WeaponTimeBase() + 0.6;
+
+	if (m_pPlayer->m_rgAmmo[m_iPrimaryAmmoType] > 0)
 	SendWeaponAnim( SQUEAK_DOWN );
-	EMIT_SOUND(ENT(m_pPlayer->pev), CHAN_WEAPON, "common/null.wav", 1.0, ATTN_NORM);
 }
 
 

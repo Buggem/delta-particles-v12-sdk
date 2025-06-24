@@ -1030,7 +1030,7 @@ void CTentacleMaw :: Spawn( )
 	pev->movetype		= MOVETYPE_STEP;
 	pev->effects		= 0;
 	pev->health			= 75;
-	pev->yaw_speed		= 8;
+	pev->yaw_speed		= 60;
 	pev->sequence		= 0;
 	
 	pev->angles.x		= 90;

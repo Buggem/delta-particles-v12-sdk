@@ -60,7 +60,7 @@ public:
 	virtual int	Save( CSave &save );
 	virtual int	Restore( CRestore &restore );
 	static TYPEDESCRIPTION m_SaveData[];
-	BOOL CFuncTankControls :: OnControls( entvars_t *pevTest );
+	BOOL OnControls( entvars_t *pevTest );
 
 	BOOL m_active; // am I being used to control tanks right now?
 	Vector		m_vecControllerUsePos; // where was the player standing when he used me?
@@ -234,7 +234,7 @@ protected:
 
 	int			m_iTankClass;	// Behave As
 
-	void CFuncTank::UpdateSpot( void );
+	void UpdateSpot( void );
 //	CLaserSpot*  m_pViewTarg;	// Player view indicator
 
 	CPointEntity *m_pFireProxy; //LRC - locus position for custom shots
@@ -276,6 +276,7 @@ TYPEDESCRIPTION	CFuncTank::m_SaveData[] =
 	DEFINE_FIELD( CFuncTank, m_iszFireMaster, FIELD_STRING ), //LRC
 	DEFINE_FIELD( CFuncTank, m_iszLocusFire, FIELD_STRING ), //LRC
 	DEFINE_FIELD( CFuncTank, m_pFireProxy, FIELD_CLASSPTR ), //LRC
+	DEFINE_FIELD( CFuncTank, m_iTankClass, FIELD_INTEGER ),
 };
 
 IMPLEMENT_SAVERESTORE( CFuncTank, CBaseEntity );
@@ -665,7 +666,7 @@ CBaseEntity *CFuncTank:: BestVisibleEnemy ( void )
 	int			iNearest;
 	int			iDist;
 	int			iBestRelationship;
-	int			iLookDist = m_maxRange?m_maxRange:512; //thanks to Waldo for this.
+	int			iLookDist = m_maxRange?m_maxRange:8192; //thanks to Waldo for this.
 
 	iNearest = 8192;// so first visible entity will become the closest.
 	pReturn = NULL;
@@ -1059,7 +1060,7 @@ void CFuncTank::TrackTarget( void )
 	UTIL_SetAvelocity(this, setAVel);
 
 	// notify the TankSequence if we're (pretty close to) facing the target
-	if (m_pSequence && abs(distY) < 0.1 && abs(distX) < 0.1)
+	if (m_pSequence && fabs(distY) < 0.1 && fabs(distX) < 0.1)
 		m_pSequence->FacingNotify();
 
 	// firing in tanksequences:

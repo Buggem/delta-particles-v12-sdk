@@ -16,7 +16,7 @@
 #define FUNC_BREAK_H
 
 typedef enum { expRandom, expDirected} Explosions;
-typedef enum { matGlass = 0, matWood, matMetal, matFlesh, matCinderBlock, matCeilingTile, matComputer, matUnbreakableGlass, matRocks, matNone, matLastMaterial } Materials;
+typedef enum { matGlass = 0, matWood, matMetal, matFlesh, matCinderBlock, matCeilingTile, matComputer, matUnbreakableGlass, matRocks, matShells, matNone, matLastMaterial } Materials;
 
 #define	NUM_SHARDS 6 // this many shards spawned when breakable objects break;
 
@@ -32,6 +32,7 @@ public:
 	void EXPORT RespawnUse( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE useType, float value );
 	void EXPORT RespawnThink( void );
 	void EXPORT RespawnFadeThink( void );
+	NODE_LINKENT HandleLinkEnt(int afCapMask, bool nodeQueryStatic);
 	void DamageSound( void );
 	virtual int Classify ( void ) { return m_iClass; }
 
@@ -64,6 +65,7 @@ public:
 	static const char *pSoundsFlesh[];
 	static const char *pSoundsGlass[];
 	static const char *pSoundsMetal[];
+	static const char *pSoundsShells[];
 	static const char *pSoundsConcrete[];
 	static const char *pSpawnObjects[];
 

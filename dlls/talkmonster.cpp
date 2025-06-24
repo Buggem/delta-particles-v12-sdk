@@ -57,6 +57,9 @@ char *CTalkMonster::m_szFriends[TLK_CFRIENDS] =
 	"monster_barney",
 	"monster_scientist",
 	"monster_sitting_scientist",
+	"monster_otis",
+	"monster_technician",
+	"monster_diana_hayes",
 };
 
 
@@ -437,7 +440,8 @@ void CTalkMonster :: StartTask( Task_t *pTask )
 
 	case TASK_TLK_HEADRESET:
 		// reset head position after looking at something
-		m_hTalkTarget = NULL;
+		if (!IsTalking())
+			m_hTalkTarget = NULL;
 		TaskComplete();
 		break;
 
@@ -942,6 +946,9 @@ void CTalkMonster :: Touch( CBaseEntity *pOther )
 		if ( m_afMemory & bits_MEMORY_PROVOKED )
 			return;
 
+		if (FBitSet(pev->spawnflags, SF_MONSTER_IGNORE_PLAYER_PUSH))
+			return;
+
 		// Stay put during speech
 		if ( IsTalking() )
 			return;
@@ -950,8 +957,11 @@ void CTalkMonster :: Touch( CBaseEntity *pOther )
 		float speed = fabs(pOther->pev->velocity.x) + fabs(pOther->pev->velocity.y);
 		if ( speed > 50 )
 		{
-			SetConditions( bits_COND_CLIENT_PUSH );
-			MakeIdealYaw( pOther->pev->origin );
+			if (m_pSchedule != NULL && (m_pSchedule->iInterruptMask & bits_COND_CLIENT_PUSH))
+			{
+			  SetConditions(bits_COND_CLIENT_PUSH);
+			  MakeIdealYaw(pOther->pev->origin);
+			}
 		}
 	}
 }
@@ -970,7 +980,7 @@ void CTalkMonster :: IdleRespond( void )
 	PlaySentence( m_szGrp[TLK_ANSWER], RANDOM_FLOAT(2.8, 3.2), VOL_NORM, ATTN_IDLE );
 }
 
-int CTalkMonster :: FOkToSpeak( void )
+int CTalkMonster :: FOkToSpeak( int speakFlags )
 {
 	// if in the grip of a barnacle, don't speak
 	if ( m_MonsterState == MONSTERSTATE_PRONE || m_IdealMonsterState == MONSTERSTATE_PRONE )
@@ -999,7 +1009,7 @@ int CTalkMonster :: FOkToSpeak( void )
 		return FALSE;
 
 	// don't talk if you're in combat
-	if (m_hEnemy != NULL && FVisible( m_hEnemy ))
+	if (!FBitSet(speakFlags, SPEAK_DISREGARD_ENEMY) && m_hEnemy != NULL && FVisible( m_hEnemy ))
 		return FALSE;
 
 	return TRUE;
@@ -1460,9 +1470,9 @@ void CTalkMonster::StartFollowing( CBaseEntity *pLeader )
 //LRC- redefined, now returns true if following would be physically possible
 BOOL CTalkMonster::CanFollow( void )
 {
-	if ( m_MonsterState == MONSTERSTATE_SCRIPT )
+	if ( m_MonsterState == MONSTERSTATE_SCRIPT || m_IdealMonsterState == MONSTERSTATE_SCRIPT )
 	{
-		if ( !m_pCine->CanInterrupt() )
+		if ( !m_pCine->CanInterruptByPlayerCall() )
 			return FALSE;
 	}
 	
